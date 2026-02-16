@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="A multi-sector holdings group across real estate, investing, AI workflows/SaaS, and clothing." />
+  <title>BRICKBRICK Holdings</title>
+  <style>
+    :root{
+      --bg: #0b0f14;
+      --bg2:#0f1622;
+      --card:#111a28;
+      --text:#eaf0ff;
+      --muted:#a9b7d0;
+      --line: rgba(255,255,255,.10);
+      --accent:#7cf7c0;
+      --accent2:#7aa8ff;
+      --shadow: 0 18px 60px rgba(0,0,0,.45);
+      --radius: 18px;
+      --radius2: 26px;
+      --max: 1100px;
+    }
+
+    *{ box-sizing:border-box; }
+    html{ scroll-behavior:smooth; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      color:var(--text);
+      background:
+        radial-gradient(1200px 700px at 15% -10%, rgba(122,168,255,.18), transparent 55%),
+        radial-gradient(1000px 600px at 85% 0%, rgba(124,247,192,.14), transparent 60%),
+        linear-gradient(180deg, var(--bg), #070a0e 55%, var(--bg));
+      line-height:1.5;
+    }
+
+    a{ color:inherit; text-decoration:none; }
+    .wrap{ max-width:var(--max); margin:0 auto; padding:0 22px; }
+
+    /* NAV */
+    .nav{
+      position:sticky; top:0; z-index:50;
+      backdrop-filter: blur(10px);
+      background: rgba(11,15,20,.70);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav-inner{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:14px 0;
+    }
+    .brand{
+      display:flex; align-items:center; gap:12px;
+      font-weight:700; letter-spacing:.4px;
+    }
+    .brand-badge{
+      width:34px; height:34px; border-radius:12px;
+      border:1px solid var(--line);
+      background:
+        linear-gradient(135deg, rgba(122,168,255,.25), rgba(124,247,192,.18));
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+      display:grid; place-items:center;
+      font-size:12px; color:var(--muted);
+    }
+    .nav-links{
+      display:flex; gap:18px; align-items:center;
+      color:var(--muted); font-weight:600; font-size:14px;
+    }
+    .nav-links a{ padding:8px 10px; border-radius:12px; }
+    .nav-links a:hover{ background:rgba(255,255,255,.06); color:var(--text); }
+
+    .cta{
+      display:flex; gap:10px; align-items:center;
+    }
+    .btn{
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.06);
+      color:var(--text);
+      padding:10px 14px;
+      border-radius:14px;
+      font-weight:700;
+      cursor:pointer;
+      transition: transform .12s ease, background .12s ease;
+      display:inline-flex; align-items:center; gap:10px;
+    }
+    .btn:hover{ transform: translateY(-1px); background: rgba(255,255,255,.09); }
+    .btn.primary{
+      border: 1px solid rgba(124,247,192,.35);
+      background: linear-gradient(135deg, rgba(124,247,192,.20), rgba(122,168,255,.14));
+    }
+    .btn.primary:hover{ background: linear-gradient(135deg, rgba(124,247,192,.28), rgba(122,168,255,.18)); }
+
+    /* HERO */
+    .hero{ padding:68px 0 36px; }
+    .hero-grid{
+      display:grid; grid-template-columns: 1.3fr .7fr; gap:22px;
+      align-items:stretch;
+    }
+    .hero-card{
+      border:1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+      border-radius: var(--radius2);
+      box-shadow: var(--shadow);
+      padding:28px;
+      position:relative;
+      overflow:hidden;
+    }
+    .hero-card:before{
+      content:"";
+      position:absolute; inset:-2px;
+      background:
+        radial-gradient(600px 260px at 20% 0%, rgba(122,168,255,.18), transparent 60%),
+        radial-gradient(600px 260px at 85% 15%, rgba(124,247,192,.16), transparent 62%);
+      pointer-events:none;
+      z-index:0;
+    }
+    .hero-card > *{ position:relative; z-index:1; }
+
+    .eyebrow{
+      display:inline-flex; gap:10px; align-items:center;
+      padding:8px 12px;
+      border:1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-weight:700; font-size:13px;
+      background: rgba(0,0,0,.18);
+      margin-bottom:14px;
+    }
+    .dot{
+      width:8px; height:8px; border-radius:99px;
+      background: var(--accent);
+      box-shadow: 0 0 0 6px rgba(124,247,192,.12);
+    }
+    h1{
+      margin:0 0 10px;
+      font-size: 44px;
+      line-height:1.08;
+      letter-spacing: -0.8px;
+    }
+    .sub{
+      margin:0 0 18px;
+      color:var(--muted);
+      font-size:16px;
+      max-width: 56ch;
+    }
+    .hero-actions{
+      display:flex; gap:12px; flex-wrap:wrap;
+      margin-top:18px;
+    }
+    .stats{
+      display:flex; gap:14px; flex-wrap:wrap;
+      margin-top:22px;
+    }
+    .pill{
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      padding:10px 12px;
+      border-radius: 16px;
+      min-width: 168px;
+    }
+    .pill b{ display:block; font-size:14px; margin-bottom:4px; }
+    .pill span{ color:var(--muted); font-size:13px; }
+
+    /* LOGO CARD */
+    .logo-card{
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      border-radius: var(--radius2);
+      box-shadow: var(--shadow);
+      padding:22px;
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+      justify-content:space-between;
+      overflow:hidden;
+      position:relative;
+    }
+    .logo-slot{
+      border:1px dashed rgba(255,255,255,.22);
+      background: rgba(0,0,0,.20);
+      border-radius: 20px;
+      height: 210px;
+      display:grid;
+      place-items:center;
+      color: var(--muted);
+      text-align:center;
+      padding:18px;
+    }
+    .logo-slot small{ display:block; margin-top:8px; opacity:.9; }
+    .logo-hint{
+      color:var(--muted);
+      font-size:13px;
+    }
+
+    /* SECTIONS */
+    section{ padding:44px 0; }
+    .section-head{
+      display:flex; align-items:flex-end; justify-content:space-between;
+      gap:18px; margin-bottom:18px;
+    }
+    .section-head h2{
+      margin:0;
+      font-size: 26px;
+      letter-spacing: -0.4px;
+    }
+    .section-head p{
+      margin:0;
+      color:var(--muted);
+      max-width: 62ch;
+      font-size:14px;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap:16px;
+    }
+    .card{
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      border-radius: var(--radius);
+      padding:18px;
+      box-shadow: 0 10px 34px rgba(0,0,0,.28);
+    }
+    .card h3{ margin:0 0 8px; font-size:16px; }
+    .card p{ margin:0; color:var(--muted); font-size:14px; }
+
+    .sector{
+      grid-column: span 6;
+      position:relative;
+      overflow:hidden;
+    }
+    .sector:before{
+      content:"";
+      position:absolute; inset:-1px;
+      background: radial-gradient(550px 220px at 15% 0%, rgba(122,168,255,.14), transparent 60%),
+                  radial-gradient(550px 220px at 85% 15%, rgba(124,247,192,.12), transparent 62%);
+      opacity:.9;
+      pointer-events:none;
+    }
+    .sector > *{ position:relative; z-index:1; }
+
+    .tagrow{
+      display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;
+    }
+    .tag{
+      font-size:12px;
+      color:var(--muted);
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.18);
+      padding:6px 10px;
+      border-radius:999px;
+      font-weight:700;
+    }
+
+    /* OPERATING MODEL */
+    .ops{
+      grid-column: span 12;
+      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+    }
+    .ops ul{
+      margin:12px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .ops li{ margin:8px 0; }
+
+    /* TEAM */
+    .team-card{
+      grid-column: span 3;
+      display:flex; flex-direction:column; gap:10px;
+    }
+    .avatar{
+      width:46px; height:46px; border-radius: 16px;
+      border:1px solid var(--line);
+      background: linear-gradient(135deg, rgba(122,168,255,.22), rgba(124,247,192,.16));
+      display:grid; place-items:center;
+      font-weight:900;
+      color: rgba(255,255,255,.90);
+      letter-spacing:.5px;
+    }
+    .role{ color:var(--muted); font-size:13px; font-weight:700; }
+
+    /* CONTACT */
+    .contact{
+      display:flex; gap:16px; flex-wrap:wrap; align-items:stretch;
+    }
+    .contact .card{ flex: 1; min-width: 260px; }
+    .input{
+      width:100%;
+      margin-top:10px;
+      padding:12px 12px;
+      border-radius: 14px;
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.20);
+      color: var(--text);
+      outline:none;
+      font-size:14px;
+    }
+    .input::placeholder{ color: rgba(169,183,208,.75); }
+    .footer{
+      padding:24px 0 34px;
+      color:var(--muted);
+      border-top: 1px solid var(--line);
+      font-size:13px;
+    }
+
+    /* RESPONSIVE */
+    @media (max-width: 900px){
+      .hero-grid{ grid-template-columns: 1fr; }
+      .sector{ grid-column: span 12; }
+      .team-card{ grid-column: span 6; }
+      h1{ font-size: 38px; }
+    }
+    @media (max-width: 520px){
+      .nav-links{ display:none; }
+      .team-card{ grid-column: span 12; }
+      h1{ font-size: 34px; }
+    }
+  </style>
+</head>
+
+<body>
+  <!-- NAV -->
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <div class="brand">
+        <div class="brand-badge">BB</div>
+        <div>
+          <div style="font-size:14px;">BRICKBRICK Holdings</div>
+          <div style="font-size:12px;color:var(--muted);font-weight:700;">Multi-sector operators</div>
+        </div>
+      </div>
+
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#sectors">Sectors</a>
+        <a href="#model">Operating Model</a>
+        <a href="#team">About</a>
+        <a href="#contact">Contact</a>
+      </nav>
+
+      <div class="cta">
+        <a class="btn" href="#contact">Partner</a>
+        <a class="btn primary" href="#sectors">Explore</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO -->
+  <main class="wrap">
+    <section class="hero" id="top">
+      <div class="hero-grid">
+        <div class="hero-card">
+          <div class="eyebrow"><span class="dot"></span> Building durable cashflow + long-term equity</div>
+          <h1>Operators across real estate, investing, AI workflows, and consumer brands.</h1>
+          <p class="sub">
+            BRICKBRICK Holdings is a multi-sector group focused on acquiring, building, and scaling assets that compound.
+            We prioritize disciplined execution, measurable ROI, and strong operating fundamentals.
+          </p>
+
+          <div class="hero-actions">
+            <a class="btn primary" href="#contact">Start a Conversation</a>
+            <a class="btn" href="#model">How We Operate</a>
+          </div>
+
+          <div class="stats" role="list" aria-label="Highlights">
+            <div class="pill" role="listitem">
+              <b>Multi-sector</b>
+              <span>Real estate, investing, AI/SaaS, clothing</span>
+            </div>
+            <div class="pill" role="listitem">
+              <b>Execution-first</b>
+              <span>Prototype → validate → scale</span>
+            </div>
+            <div class="pill" role="listitem">
+              <b>Capital discipline</b>
+              <span>Risk-managed growth</span>
+            </div>
+          </div>
+        </div>
+
+        <aside class="logo-card">
+          <div>
+            <div style="font-weight:800; letter-spacing:.2px;">Logo</div>
+            <div class="logo-hint">Drop your logo image in the repo and update the code below.</div>
+          </div>
+
+          <div class="logo-slot">
+            <div>
+              <div style="font-weight:900; font-size:18px;">[Your Logo Here]</div>
+              <small>Replace this with an <code>&lt;img&gt;</code> tag</small>
+            </div>
+          </div>
+
+          <div class="logo-hint">
+            Tip: add <code>assets/logo.png</code> then replace the logo slot with:
+            <br><code>&lt;img src="assets/logo.png" alt="BRICKBRICK logo" style="max-width:100%;max-height:210px;"&gt;</code>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- SECTORS -->
+    <section id="sectors">
+      <div class="section-head">
+        <div>
+          <h2>Sectors</h2>
+          <p>We build and allocate into verticals where strong operations and smart capital can create asymmetric outcomes.</p>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card sector">
+          <h3>Real Estate</h3>
+          <p>
+            Focused on cash-flowing properties and strategic acquisitions where operational improvements drive value.
+            Emphasis on clean reporting, stable tenants, and durable downside protection.
+          </p>
+          <div class="tagrow">
+            <span class="tag">Cashflow</span>
+            <span class="tag">Value-add ops</span>
+            <span class="tag">Long-term equity</span>
+          </div>
+        </div>
+
+        <div class="card sector">
+          <h3>Investing</h3>
+          <p>
+            A disciplined approach to public markets and private opportunities. We prioritize repeatable strategies,
+            risk management, and high-quality decision processes.
+          </p>
+          <div class="tagrow">
+            <span class="tag">Risk managed</span>
+            <span class="tag">Research driven</span>
+            <span class="tag">Compounding</span>
+          </div>
+        </div>
+
+        <div class="card sector">
+          <h3>AI Workflows & SaaS</h3>
+          <p>
+            We prototype and deploy AI-powered workflows that remove manual work inside businesses. From intake automation
+            to document processing and reporting, we focus on fast ROI and scalable systems.
+          </p>
+          <div class="tagrow">
+            <span class="tag">Automation</span>
+            <span class="tag">Prototype sprints</span>
+            <span class="tag">SaaS buildouts</span>
+          </div>
+        </div>
+
+        <div class="card sector">
+          <h3>Clothing</h3>
+          <p>
+            A consumer brand arm built with strong creative direction and modern distribution. We prioritize quality,
+            brand identity, and disciplined launches backed by data.
+          </p>
+          <div class="tagrow">
+            <span class="tag">Brand</span>
+            <span class="tag">Drop strategy</span>
+            <span class="tag">E-commerce</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- OPERATING MODEL -->
+    <section id="model">
+      <div class="section-head">
+        <div>
+          <h2>Operating Model</h2>
+          <p>We run each vertical with clear accountability, measurable targets, and repeatable systems.</p>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card ops">
+          <h3>How we work</h3>
+          <p style="color:var(--muted); margin:0;">
+            Our approach is built to generate cashflow early, then scale into longer-term compounding assets.
+          </p>
+          <ul>
+            <li><b>Identify</b> a high-ROI opportunity (cashflow or strategic edge).</li>
+            <li><b>Prototype</b> quickly (for AI/SaaS) or validate unit economics (for physical assets).</li>
+            <li><b>Operate</b> with clean reporting, defined owners, and measurable KPIs.</li>
+            <li><b>Reinvest</b> into scalable systems and durable assets.</li>
+            <li><b>Standardize</b> playbooks so wins can be repeated across businesses.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- TEAM -->
+    <section id="team">
+      <div class="section-head">
+        <div>
+          <h2>About Us</h2>
+          <p>Four partners building a long-term, execution-focused holdings group.</p>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card team-card">
+          <div class="avatar">A</div>
+          <div style="font-weight:800;">Athan</div>
+          <div class="role">Partner</div>
+          <p>Add Athan’s short bio here (focus: ops strengths, domain expertise, or sector leadership).</p>
+        </div>
+
+        <div class="card team-card">
+          <div class="avatar">C</div>
+          <div style="font-weight:800;">Chris</div>
+          <div class="role">Partner</div>
+          <p>Add Chris’s short bio here (focus: execution, strategy, deal sourcing, or product/brand work).</p>
+        </div>
+
+        <div class="card team-card">
+          <div class="avatar">J</div>
+          <div style="font-weight:800;">Jacob</div>
+          <div class="role">Partner</div>
+          <p>Add Jacob’s short bio here (focus: operations, finance, investing, engineering, or acquisitions).</p>
+        </div>
+
+        <div class="card team-card">
+          <div class="avatar">A</div>
+          <div style="font-weight:800;">Abhi</div>
+          <div class="role">Partner</div>
+          <p>Add your short bio here (focus: investing, engineering, AI workflows, or strategy).</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- CONTACT -->
+    <section id="contact">
+      <div class="section-head">
+        <div>
+          <h2>Contact</h2>
+          <p>Partnerships, acquisitions, and business inquiries. We respond fast when the fit is strong.</p>
+        </div>
+      </div>
+
+      <div class="contact">
+        <div class="card">
+          <h3>Get in touch</h3>
+          <p>Send a short note with what you’re working on and what you’d like to build together.</p>
+
+          <input class="input" id="name" placeholder="Your name" />
+          <input class="input" id="email" placeholder="Your email" />
+          <input class="input" id="topic" placeholder="Topic (Real Estate / Investing / AI / Clothing)" />
+          <textarea class="input" id="message" rows="5" placeholder="Message"></textarea>
+
+          <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+            <button class="btn primary" onclick="sendMail()">Email Us</button>
+            <a class="btn" href="#top">Back to top</a>
+          </div>
+
+          <p style="color:var(--muted); font-size:12px; margin-top:10px;">
+            This form uses your email client via <code>mailto:</code>. For a real form later, connect Formspree or Netlify Forms.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>What to include</h3>
+          <p style="margin-bottom:10px;">To speed things up, include:</p>
+          <ul style="margin:0; padding-left:18px; color:var(--muted); font-size:14px;">
+            <li>Company + website</li>
+            <li>Your goal (prototype, acquisition, partnership)</li>
+            <li>Timeline + budget range (if applicable)</li>
+            <li>Any documents or context links</li>
+          </ul>
+
+          <div style="margin-top:14px; border-top:1px solid var(--line); padding-top:14px; color:var(--muted); font-size:14px;">
+            <div style="font-weight:800; color:var(--text); margin-bottom:6px;">Email</div>
+            <div>Replace with your business email: <b>hello@yourdomain.com</b></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer">
+      <div class="wrap" style="padding:0;">
+        © <span id="year"></span> BRICKBRICK Holdings. All rights reserved.
+      </div>
+    </div>
+  </main>
+
+  <script>
+    document.getElementById("year").textContent = new Date().getFullYear();
+
+    function sendMail(){
+      const name = document.getElementById("name").value.trim();
+      const email = document.getElementById("email").value.trim();
+      const topic = document.getElementById("topic").value.trim();
+      const message = document.getElementById("message").value.trim();
+
+      const to = "hello@yourdomain.com"; // TODO: replace
+      const subject = encodeURIComponent(`[BRICKBRICK] ${topic || "Inquiry"} — ${name || "New message"}`);
+      const body = encodeURIComponent(
+`Name: ${name}
+Email: ${email}
+Topic: ${topic}
+
+Message:
+${message}
+`);
+      window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
+    }
+  </script>
+</body>
+</html>
