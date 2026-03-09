@@ -3,7 +3,8 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ─── TEAM WORKSPACE ──────────────────────────────────────────────────────
-    // Pipeline, tasks, and decisions are only accessible to authenticated users.
+    // All three workspace collections require Firebase Authentication.
+    // No unauthenticated access.
     match /pipeline/{docId} {
       allow read, write: if request.auth != null;
     }
@@ -16,20 +17,17 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
-    // ─── CONTACT FORM ────────────────────────────────────────────────────────
-    // contact_submissions: public can create (form submits without login).
-    // Only authenticated team members can read.
+    // ─── CONTACT FORM SUBMISSIONS ────────────────────────────────────────────
+    // Public visitors can CREATE a submission (the contact form).
+    // Only authenticated team members can read or delete records.
+    // No Cloud Functions, no Secret Manager, no Blaze plan required.
     match /contact_submissions/{docId} {
       allow create: if true;
       allow read, update, delete: if request.auth != null;
     }
 
-    // mail: written by the contact form (public create) so the Firebase
-    // "Trigger Email from Firestore" extension picks it up and sends email.
-    // No reads needed from client side.
-    match /mail/{docId} {
-      allow create: if true;
-      allow read, update, delete: if request.auth != null;
-    }
+    // NOTE: The `mail` collection rule has been removed.
+    // The Firebase "Trigger Email" extension required Blaze plan / Secret Manager.
+    // Email is now handled by Web3Forms (static-site-friendly, no backend needed).
   }
 }

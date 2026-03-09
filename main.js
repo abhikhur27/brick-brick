@@ -1,107 +1,146 @@
 // ─── FIREBASE SETUP ──────────────────────────────────────────────────────────
-import { initializeApp }       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+// Only used for saving contact submissions to Firestore for internal tracking.
+// No Cloud Functions. No Secret Manager. Works on Spark plan.
+import { initializeApp }  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, collection, addDoc, serverTimestamp }
-                                from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { firebaseConfig }       from "./firebase-config.js";
+                           from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { firebaseConfig }  from "./firebase-config.js";
 
 const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
 
-// ─── NAV MENU ────────────────────────────────────────────────────────────────
+// ─── Web3Forms access key ─────────────────────────────────────────────────────
+// This key is PUBLIC by design — it only allows submission to YOUR configured
+// destination email. It cannot read submissions, change your account, or be
+// used to send to other addresses. Safe to embed in client-side JS.
+// Replace the placeholder below with your real key from web3forms.com/access.
+const WEB3FORMS_KEY = "945ebcbf-b856-41d0-919e-f5d39418ea06";
+
+// ─── NAV MENU ─────────────────────────────────────────────────────────────────
 const menuToggle = document.getElementById("menuToggle");
 const mobileMenu = document.getElementById("mobileMenu");
 
 if (menuToggle && mobileMenu) {
-  menuToggle.addEventListener("click", () => {
-    mobileMenu.classList.toggle("open");
-  });
-  mobileMenu.querySelectorAll("a").forEach((link) => {
-    link.addEventListener("click", () => mobileMenu.classList.remove("open"));
-  });
+  menuToggle.addEventListener("click", () => mobileMenu.classList.toggle("open"));
+  mobileMenu.querySelectorAll("a").forEach((link) =>
+    link.addEventListener("click", () => mobileMenu.classList.remove("open"))
+  );
 }
 
-// ─── FOOTER YEAR ─────────────────────────────────────────────────────────────
+// ─── FOOTER YEAR ──────────────────────────────────────────────────────────────
 const yearEl = document.getElementById("year");
 if (yearEl) yearEl.textContent = new Date().getFullYear();
 
 // ─── CONTACT FORM ─────────────────────────────────────────────────────────────
-// Architecture:
-//   1. Write the submission to `contact_submissions` (team can view it in portal later).
-//   2. Write a `mail` document — the Firebase "Trigger Email from Firestore" extension
-//      watches this collection and sends the email automatically.
-//   Both writes happen in the same async block.  If Firebase isn't available, fall back
-//   to mailto so the form is never a dead end.
-
-const contactForm  = document.getElementById("contactForm");
-const cfStatus     = document.getElementById("cfStatus");
-const cfSubmitBtn  = document.getElementById("cfSubmitBtn");
+const contactForm = document.getElementById("contactForm");
+const cfStatus    = document.getElementById("cfStatus");
+const cfSubmitBtn = document.getElementById("cfSubmitBtn");
 
 if (contactForm) {
   contactForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
+    // Read field values — IDs match the updated index.html
     const name    = document.getElementById("cfName").value.trim();
     const email   = document.getElementById("cfEmail").value.trim();
     const company = document.getElementById("cfCompany").value.trim();
     const message = document.getElementById("cfMessage").value.trim();
+    // Honeypot — if filled, a bot submitted the form; silently reject
+    const honeypot = document.getElementById("cfHoneypot").value;
 
-    if (!name || !email) {
-      showStatus("Please fill in your name and email.", true);
+    if (honeypot) {
+      // Bot detected: fake success so bots don't retry
+      showStatus("Message sent. We'll be in touch within one business day.", false);
+      contactForm.reset();
       return;
     }
 
-    cfSubmitBtn.disabled    = true;
-    cfSubmitBtn.textContent = "Sending…";
-    cfStatus.className      = "form-status";
-    cfStatus.textContent    = "";
+    if (!name || !email) {
+      showStatus("Please include your name and email.", true);
+      return;
+    }
 
-    const submissionData = { name, email, company, message, submittedAt: serverTimestamp() };
+    setLoading(true);
 
+    // ── Step 1: Send email via Web3Forms ─────────────────────────────────────
+    // Web3Forms accepts a plain JSON POST. The access key routes the submission
+    // to the email address configured in your Web3Forms dashboard.
+    let emailSent = false;
     try {
-      // 1. Save to contact_submissions (no auth needed — Firestore rule allows public writes)
-      await addDoc(collection(db, "contact_submissions"), submissionData);
+      const payload = {
+        access_key:   WEB3FORMS_KEY,
+        subject:      `New inquiry from ${name}`,
+        from_name:    "BrickBrick Contact Form",
+        // reply-to lets you hit Reply in Gmail and it goes to the sender
+        replyto:      email,
+        name,
+        email,
+        company:      company || "—",
+        message:      message || "No message provided.",
+        // Tell Web3Forms not to send their default confirmation email to sender
+        // (we're not promising that to users)
+        botcheck:     "",
+      };
 
-      // 2. Write to `mail` collection for Firebase "Trigger Email" extension
-      await addDoc(collection(db, "mail"), {
-        to: "contact@brick-brick.org",
-        message: {
-          subject: `New inquiry from ${name || "visitor"}`,
-          html: `
-            <p><strong>Name:</strong> ${escHtml(name)}</p>
-            <p><strong>Email:</strong> ${escHtml(email)}</p>
-            <p><strong>Company:</strong> ${escHtml(company || "—")}</p>
-            <hr>
-            <p><strong>Message:</strong></p>
-            <p>${escHtml(message).replace(/\n/g, "<br>")}</p>
-          `,
-          text: `Name: ${name}\nEmail: ${email}\nCompany: ${company || "—"}\n\nMessage:\n${message}`,
-        },
+      const res = await fetch("https://api.web3forms.com/submit", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body:    JSON.stringify(payload),
       });
-
-      contactForm.reset();
-      cfSubmitBtn.textContent = "Sent ✓";
-      showStatus("Message sent. We'll be in touch within one business day.", false);
+      const data = await res.json();
+      emailSent = data.success === true;
     } catch (err) {
-      console.error("Contact form error:", err);
-      // Graceful fallback: open mailto
-      const subject = encodeURIComponent(`BrickBrick inquiry from ${name || "visitor"}`);
-      const body    = encodeURIComponent(`Name: ${name}\nEmail: ${email}\nCompany: ${company}\n\n${message}`);
-      window.location.href = `mailto:contact@brick-brick.org?subject=${subject}&body=${body}`;
+      console.warn("Web3Forms request failed:", err);
+    }
+
+    // ── Step 2: Save to Firestore for internal records ────────────────────────
+    // This is a direct client write to Firestore — no Cloud Functions, no Blaze.
+    // The contact_submissions collection is write-open (no auth required) per rules.
+    let firestoreSaved = false;
+    try {
+      await addDoc(collection(db, "contact_submissions"), {
+        name,
+        email,
+        company:      company || "",
+        message:      message || "",
+        submittedAt:  serverTimestamp(),
+        emailRelayed: emailSent,
+      });
+      firestoreSaved = true;
+    } catch (err) {
+      console.warn("Firestore save failed (non-fatal):", err);
+    }
+
+    setLoading(false);
+
+    if (emailSent || firestoreSaved) {
+      contactForm.reset();
+      showStatus("Message received — we'll follow up within one business day.", false);
+    } else {
+      // Both paths failed — give a real fallback so the person isn't stuck
+      showStatus(
+        "Submission failed. Please email us directly at contact@brick-brick.org.",
+        true
+      );
     }
   });
 }
 
+// ─── UI HELPERS ───────────────────────────────────────────────────────────────
+function setLoading(on) {
+  if (!cfSubmitBtn) return;
+  cfSubmitBtn.disabled    = on;
+  cfSubmitBtn.textContent = on ? "Sending…" : "Send inquiry";
+}
+
 function showStatus(msg, isError) {
-  cfStatus.textContent  = msg;
-  cfStatus.className    = "form-status" + (isError ? " error" : "");
-  cfSubmitBtn.disabled  = false;
-  cfSubmitBtn.textContent = "Send inquiry";
+  if (!cfStatus) return;
+  cfStatus.textContent = msg;
+  cfStatus.className   = "form-status" + (isError ? " error" : "");
 }
 
 function escHtml(str) {
-  return String(str || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return String(str ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }

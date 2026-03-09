@@ -42,6 +42,8 @@
   </header>
 
   <main id="top">
+
+    <!-- ─── HERO ──────────────────────────────────────────── -->
     <section class="hero section">
       <div class="container hero-grid">
         <div class="hero-copy">
@@ -96,6 +98,7 @@
       </div>
     </section>
 
+    <!-- ─── SERVICES ──────────────────────────────────────── -->
     <section class="section" id="services">
       <div class="container">
         <div class="section-heading">
@@ -174,6 +177,7 @@
       </div>
     </section>
 
+    <!-- ─── PROCESS ────────────────────────────────────────── -->
     <section class="section alt" id="process">
       <div class="container">
         <div class="section-heading">
@@ -263,7 +267,7 @@
       </div>
     </section>
 
-    <!-- ─── CONTACT ──────────────────────────────────────── -->
+    <!-- ─── CONTACT ────────────────────────────────────────── -->
     <section class="section alt" id="contact">
       <div class="container contact-grid">
         <div>
@@ -277,28 +281,50 @@
           </div>
         </div>
 
+        <!--
+          Form fields use "cf" prefix IDs to avoid any collision with portal IDs.
+          cfHoneypot is visually hidden — humans never fill it; bots do.
+          cfStatus shows submission result inline without a page reload.
+        -->
         <form class="card contact-form" id="contactForm" novalidate>
+
+          <!-- Honeypot: hidden from humans, catches bots -->
+          <input
+            type="text"
+            id="cfHoneypot"
+            name="botcheck"
+            tabindex="-1"
+            autocomplete="off"
+            aria-hidden="true"
+            style="display:none !important"
+          >
+
           <label>
             Name
-            <input type="text" id="cfName" placeholder="Your name" required>
+            <input type="text" id="cfName" placeholder="Your name" required autocomplete="name">
           </label>
           <label>
             Email
-            <input type="email" id="cfEmail" placeholder="Your email" required>
+            <input type="email" id="cfEmail" placeholder="Your email" required autocomplete="email">
           </label>
           <label>
             Company
-            <input type="text" id="cfCompany" placeholder="Company or brand">
+            <input type="text" id="cfCompany" placeholder="Company or brand" autocomplete="organization">
           </label>
           <label>
             What do you need?
             <textarea id="cfMessage" rows="4" placeholder="Website, automation, dashboard, portal, or something adjacent"></textarea>
           </label>
+
           <button type="submit" class="button primary full" id="cfSubmitBtn">Send inquiry</button>
-          <p class="form-status" id="cfStatus"></p>
+
+          <!-- Inline status message — shown after submission -->
+          <p class="form-status" id="cfStatus" aria-live="polite"></p>
+
         </form>
       </div>
     </section>
+
   </main>
 
   <footer class="site-footer">
@@ -308,6 +334,7 @@
     </div>
   </footer>
 
+  <!-- ES module — loads Firebase + Web3Forms logic -->
   <script type="module" src="main.js"></script>
 </body>
 </html>
