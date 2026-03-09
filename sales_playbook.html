@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>BrickBrick — Sales Playbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0b0f14;
+  --bg2: #0f1622;
+  --card: #111a28;
+  --card2: #0d1520;
+  --text: #eaf0ff;
+  --muted: #a9b7d0;
+  --line: rgba(255,255,255,.10);
+  --accent: #7cf7c0;
+  --accent2: #7aa8ff;
+  --accent-glow: rgba(124,247,192,.15);
+  --accent2-glow: rgba(122,168,255,.15);
+  --shadow: 0 18px 60px rgba(0,0,0,.45);
+  --radius: 18px;
+  --warn: #fbbf24;
+  --warn-glow: rgba(251,191,36,.12);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+  background:
+    radial-gradient(1200px 700px at 15% -10%, rgba(122,168,255,.18), transparent 55%),
+    radial-gradient(1000px 600px at 85% 0%, rgba(124,247,192,.14), transparent 60%),
+    linear-gradient(180deg, var(--bg), #070a0e 55%, var(--bg));
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+.wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+/* ─── HEADER ──────────────────────────────────── */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(12px);
+  background: rgba(11,15,20,.80);
+  border-bottom: 1px solid var(--line);
+}
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+}
+
+.brand-badge {
+  width: 34px; height: 34px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: linear-gradient(135deg, rgba(122,168,255,.25), rgba(124,247,192,.18));
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+}
+
+.brand-text strong { font-size: 14px; display: block; }
+.brand-text small { font-size: 11px; color: var(--muted); font-weight: 400; }
+
+.header-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(124,247,192,.08);
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 5px rgba(124,247,192,.15);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 5px rgba(124,247,192,.15); }
+  50% { box-shadow: 0 0 0 8px rgba(124,247,192,.05); }
+}
+
+/* ─── HERO ──────────────────────────────────── */
+.hero {
+  padding: 56px 0 40px;
+  animation: fadeUp .5s ease both;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.hero-kicker {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.hero h1 {
+  font-family: 'Syne', sans-serif;
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.5px;
+  margin-bottom: 14px;
+}
+
+.hero p {
+  color: var(--muted);
+  font-size: 16px;
+  max-width: 58ch;
+  margin-bottom: 28px;
+}
+
+.hero-pills {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255,255,255,.04);
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: .5px;
+}
+
+/* ─── SECTION ──────────────────────────────── */
+.section { padding: 48px 0; animation: fadeUp .5s ease both; }
+.section:nth-child(2) { animation-delay: .1s; }
+.section:nth-child(3) { animation-delay: .2s; }
+.section:nth-child(4) { animation-delay: .3s; }
+
+.section-kicker {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: block;
+  margin-bottom: 10px;
+}
+
+.section-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  margin-bottom: 6px;
+}
+
+.section-sub {
+  color: var(--muted);
+  font-size: 14px;
+  margin-bottom: 28px;
+  max-width: 60ch;
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 0;
+}
+
+/* ─── TIPS ──────────────────────────────────── */
+.tips-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.tip-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 22px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color .2s ease, transform .2s ease;
+}
+
+.tip-card:hover {
+  border-color: rgba(124,247,192,.25);
+  transform: translateY(-2px);
+}
+
+.tip-card::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  background: radial-gradient(500px 200px at 0% 0%, rgba(124,247,192,.07), transparent 60%);
+  pointer-events: none;
+}
+
+.tip-num {
+  font-family: 'Syne', sans-serif;
+  font-size: 48px;
+  font-weight: 800;
+  color: rgba(124,247,192,.12);
+  line-height: 1;
+  margin-bottom: 10px;
+  letter-spacing: -2px;
+}
+
+.tip-card h3 {
+  font-family: 'Syne', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.tip-card p {
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.tip-card .quote {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-left: 2px solid var(--accent);
+  background: rgba(124,247,192,.06);
+  border-radius: 0 8px 8px 0;
+  font-size: 13px;
+  color: var(--accent);
+  font-style: italic;
+}
+
+/* ─── PRICING TABLES ──────────────────────────── */
+.pricing-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.pricing-block {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.pricing-block-header {
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255,255,255,.02);
+}
+
+.pricing-block-header h3 {
+  font-family: 'Syne', sans-serif;
+  font-size: 17px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.pricing-block-header p {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pricing-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.pricing-table thead tr {
+  background: rgba(255,255,255,.03);
+}
+
+.pricing-table th {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 10px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+}
+
+.pricing-table td {
+  padding: 13px 16px;
+  font-size: 13px;
+  color: var(--muted);
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  vertical-align: top;
+}
+
+.pricing-table tr:last-child td { border-bottom: none; }
+
+.pricing-table tr:hover td {
+  background: rgba(255,255,255,.02);
+}
+
+.tier-name {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.price-tag {
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.price-tag.monthly {
+  color: var(--accent2);
+}
+
+.tier-badge {
+  display: inline-block;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  margin-left: 6px;
+}
+
+.badge-starter { background: rgba(124,247,192,.12); color: var(--accent); border: 1px solid rgba(124,247,192,.2); }
+.badge-growth  { background: rgba(122,168,255,.12); color: var(--accent2); border: 1px solid rgba(122,168,255,.2); }
+.badge-pro     { background: rgba(251,191,36,.12);  color: var(--warn);    border: 1px solid rgba(251,191,36,.2); }
+.badge-rec     { background: rgba(124,247,192,.12); color: var(--accent); border: 1px solid rgba(124,247,192,.2); font-size: 8px; }
+
+/* ─── BY TYPE TABLE ──────────────────────────── */
+.type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.type-card {
+  background: var(--card2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  transition: border-color .2s, transform .2s;
+}
+
+.type-card:hover {
+  border-color: rgba(122,168,255,.3);
+  transform: translateY(-2px);
+}
+
+.type-card h4 {
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+
+.type-card .type-price {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--accent2);
+  margin-bottom: 4px;
+}
+
+.type-card .type-tier {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* ─── RATIONALE BOX ──────────────────────────── */
+.rationale {
+  background: linear-gradient(135deg, rgba(124,247,192,.07), rgba(122,168,255,.05));
+  border: 1px solid rgba(124,247,192,.18);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  margin-top: 20px;
+}
+
+.rationale-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rationale p {
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.rationale strong { color: var(--text); }
+
+/* ─── RECOMMENDATION BOX ─────────────────────── */
+.rec-box {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.rec-card {
+  background: var(--card2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.rec-card .rec-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.rec-card .rec-client {
+  font-family: 'Syne', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.rec-card .rec-tier {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--accent2);
+}
+
+/* ─── FOOTER ──────────────────────────────────── */
+.footer {
+  border-top: 1px solid var(--line);
+  padding: 24px 0;
+  margin-top: 40px;
+}
+
+.footer-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.footer p {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: .5px;
+}
+
+.footer a {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+  letter-spacing: .5px;
+}
+
+.footer a:hover { text-decoration: underline; }
+
+/* ─── RESPONSIVE ──────────────────────────────── */
+@media (max-width: 800px) {
+  .pricing-section { grid-template-columns: 1fr; }
+  .rec-box { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 32px; }
+  .header-badge { display: none; }
+}
+
+@media (max-width: 520px) {
+  .tips-grid { grid-template-columns: 1fr; }
+  .type-grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="wrap header-inner">
+    <div class="brand">
+      <div class="brand-badge">BB</div>
+      <div class="brand-text">
+        <strong>BrickBrick</strong>
+        <small>Workflow infrastructure</small>
+      </div>
+    </div>
+    <div class="header-badge">
+      <span class="dot"></span>
+      Sales Playbook — Internal Use
+    </div>
+  </div>
+</header>
+
+<!-- HERO -->
+<div class="wrap">
+  <section class="hero">
+    <div class="hero-kicker">Internal · Sales Reference</div>
+    <h1>AI Workflow Sales Playbook</h1>
+    <p>Everything you need to price confidently, handle objections, and close — while you're on a call with a business owner.</p>
+    <div class="hero-pills">
+      <span class="pill">📋 Pricing tiers</span>
+      <span class="pill">💬 Talk tracks</span>
+      <span class="pill">🎯 Positioning tips</span>
+      <span class="pill">📊 By workflow type</span>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- TIPS SECTION -->
+  <section class="section">
+    <span class="section-kicker">Strategy</span>
+    <div class="section-title">Pricing Tips for Pre-Revenue Conversations</div>
+    <p class="section-sub">Use these before and during any sales call. These are your mental frameworks, not scripts.</p>
+
+    <div class="tips-grid">
+
+      <div class="tip-card">
+        <div class="tip-num">01</div>
+        <h3>Lead with a Founder's Rate</h3>
+        <p>Offer your first 2–3 clients a 20–30% discount. Frame it as early access pricing — not desperation. Get testimonials and case studies in return.</p>
+        <div class="quote">"We're offering early access pricing for our first few clients this quarter."</div>
+      </div>
+
+      <div class="tip-card">
+        <div class="tip-num">02</div>
+        <h3>Always Anchor High First</h3>
+        <p>Quote the Growth tier first, then offer Starter as the step-down. Never lead with the cheapest option — it sets the wrong ceiling.</p>
+        <div class="quote">"Most clients in your situation start at the Growth tier. We also have a Starter option if you want to begin smaller."</div>
+      </div>
+
+      <div class="tip-card">
+        <div class="tip-num">03</div>
+        <h3>Bundle the Retainer Into the Sale</h3>
+        <p>Normalize recurring revenue from day one. The client should expect ongoing fees before they sign, not after.</p>
+        <div class="quote">"The build is $4,500 and we include the first month of maintenance — then it's $400/mo to keep it running and improving."</div>
+      </div>
+
+      <div class="tip-card">
+        <div class="tip-num">04</div>
+        <h3>Charge a Discovery Fee</h3>
+        <p>For larger projects, charge $300–$500 just to scope the work. It filters unserious clients and pays you to write the proposal. Apply it toward the build if they sign.</p>
+        <div class="quote">"To map this properly, we do a paid scoping session. That fee goes toward your build if you move forward."</div>
+      </div>
+
+      <div class="tip-card">
+        <div class="tip-num">05</div>
+        <h3>Compete on ROI, Not Price</h3>
+        <p>Don't race SMBs to the bottom. Frame every proposal around what the automation saves or earns them — not what it costs you to build.</p>
+        <div class="quote">"Most clients save 10–20 hours a week from this. At $30/hr that's $1,200–$2,400/mo back in their business."</div>
+      </div>
+
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- PRICING SECTION -->
+  <section class="section">
+    <span class="section-kicker">Pricing</span>
+    <div class="section-title">Project & Retainer Pricing</div>
+    <p class="section-sub">Two fee structures — one-time build, one monthly retainer. Always sell both together.</p>
+
+    <div class="pricing-section">
+
+      <!-- BUILD FEES -->
+      <div class="pricing-block">
+        <div class="pricing-block-header">
+          <h3>One-Time Build Fee</h3>
+          <p>What you charge to scope, build, and deploy the workflow.</p>
+        </div>
+        <table class="pricing-table">
+          <thead>
+            <tr>
+              <th>Tier</th>
+              <th>Complexity</th>
+              <th>Price Range</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tier-name">Starter</span><span class="tier-badge badge-starter">Starter</span></td>
+              <td>Single workflow, 1–2 integrations</td>
+              <td><span class="price-tag">$1,500 – $3,000</span></td>
+            </tr>
+            <tr>
+              <td><span class="tier-name">Growth</span><span class="tier-badge badge-growth">Growth</span></td>
+              <td>Multi-step, 3–5 integrations</td>
+              <td><span class="price-tag">$3,000 – $7,500</span></td>
+            </tr>
+            <tr>
+              <td><span class="tier-name">Pro</span><span class="tier-badge badge-pro">Pro</span></td>
+              <td>Full system, multiple workflows, custom logic</td>
+              <td><span class="price-tag">$7,500 – $15,000+</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- RETAINER -->
+      <div class="pricing-block">
+        <div class="pricing-block-header">
+          <h3>Monthly Maintenance Retainer</h3>
+          <p>Charged on top of the build fee, every month after delivery.</p>
+        </div>
+        <table class="pricing-table">
+          <thead>
+            <tr>
+              <th>Tier</th>
+              <th>What's Included</th>
+              <th>Price</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tier-name">Basic</span></td>
+              <td>Monitoring, minor fixes, 1 update/mo</td>
+              <td><span class="price-tag monthly">$150 – $300/mo</span></td>
+            </tr>
+            <tr>
+              <td>
+                <span class="tier-name">Standard</span>
+                <span class="tier-badge badge-rec">Recommended</span>
+              </td>
+              <td>Above + prompt tuning, integrations support, 3 updates/mo</td>
+              <td><span class="price-tag monthly">$300 – $600/mo</span></td>
+            </tr>
+            <tr>
+              <td><span class="tier-name">Premium</span></td>
+              <td>Above + priority support, monthly optimization calls</td>
+              <td><span class="price-tag monthly">$600 – $1,200/mo</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- RETAINER RECOMMENDATION -->
+    <div class="rec-box">
+      <div class="rec-card">
+        <div class="rec-label">Default recommendation</div>
+        <div class="rec-client">SMB Clients</div>
+        <div class="rec-tier">→ Start on Standard retainer ($300–$600/mo)</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-label">Upgrade recommendation</div>
+        <div class="rec-client">Mid-Market Clients</div>
+        <div class="rec-tier">→ Start on Premium retainer ($600–$1,200/mo)</div>
+      </div>
+    </div>
+
+    <!-- RATIONALE -->
+    <div class="rationale">
+      <div class="rationale-title">💡 Why These Numbers Work</div>
+      <p>At <strong>$50/hr</strong>, a 40-hour build = $2,000. These prices give you healthy margin and reflect the <strong>value delivered</strong>, not just hours worked. Even small businesses save <strong>10–20 hrs/week</strong> from automation — that's worth $500–$2,000/mo to them. You're not selling labor. You're selling reclaimed time and reduced errors.</p>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- BY WORKFLOW TYPE -->
+  <section class="section">
+    <span class="section-kicker">Reference</span>
+    <div class="section-title">Pricing by Workflow Type</div>
+    <p class="section-sub">Use this to quickly match a client's need to the right tier during a call.</p>
+
+    <div class="type-grid">
+      <div class="type-card">
+        <h4>Lead Gen / Outreach</h4>
+        <div class="type-price">$1,500 – $5,000</div>
+        <div class="type-tier">Starter → Growth</div>
+      </div>
+      <div class="type-card">
+        <h4>Customer Support Chatbot</h4>
+        <div class="type-price">$3,000 – $7,000</div>
+        <div class="type-tier">Growth tier</div>
+      </div>
+      <div class="type-card">
+        <h4>Internal Ops (HR, Finance)</h4>
+        <div class="type-price">$4,000 – $12,000</div>
+        <div class="type-tier">Growth → Pro</div>
+      </div>
+      <div class="type-card">
+        <h4>Marketing / Content Auto.</h4>
+        <div class="type-price">$2,000 – $6,000</div>
+        <div class="type-tier">Starter → Growth</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <p>© <span id="year"></span> BrickBrick — Internal Use Only</p>
+    <a href="portal.html">← Back to Team Portal</a>
+  </div>
+</footer>
+
+<script>
+  document.getElementById("year").textContent = new Date().getFullYear();
+</script>
+</body>
+</html>

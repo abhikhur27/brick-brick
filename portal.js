@@ -156,6 +156,10 @@ window.refreshAll = function () {
   startListeners();
 };
 
+window.openSalesPlaybook = function () {
+  window.location.href = "sales_playbook.html";
+};
+
 // ─── PIPELINE RENDER ──────────────────────────────────────────────────────────
 function renderPipeline(cards) {
   const board = document.getElementById("kanbanBoard");
@@ -511,15 +515,11 @@ window.openAddModal = function (type, context) {
   const titles = { pipeline: "ADD LEAD", tasks: "ADD TASK", decisions: "LOG MEETING" };
   document.getElementById("modalTitle").textContent = titles[modalMode] || "ADD";
 
-  // Reset counter BEFORE rendering so row IDs start at 1
-  decisionRowCount = 0;
   document.getElementById("modalBody").innerHTML = getModalForm(modalMode);
   document.getElementById("modalOverlay").classList.add("open");
 
-  // For decisions: add the first row programmatically via addDecisionRow()
-  // so the initial row uses the exact same code path as every subsequent row.
   if (modalMode === "decisions") {
-    addDecisionRow();
+    resetDecisionRows();
   }
 };
 
@@ -618,7 +618,7 @@ function getModalForm(mode) {
       </div>
       <div id="decisionRowsContainer"></div>
       <button type="button" class="btn btn-ghost add-decision-row-btn" onclick="addDecisionRow()">
-        ＋ Add another decision
+        + Add new decision
       </button>
     `;
   }
@@ -629,11 +629,19 @@ function getModalForm(mode) {
 // Each row is a self-contained block with a text field, owner field, and
 // a remove button (hidden on the first row if it's the only one).
 
-let decisionRowCount = 1;
+let decisionRowCount = 0;
+
+function resetDecisionRows() {
+  decisionRowCount = 0;
+  const container = document.getElementById("decisionRowsContainer");
+  if (!container) return;
+  container.innerHTML = "";
+  window.addDecisionRow();
+}
 
 function buildDecisionRow(n) {
   return `
-    <div class="decision-row" id="drow-${n}">
+    <div class="decision-row" data-decision-row="true" id="drow-${n}">
       <div class="decision-row-header">
         <span class="form-label" style="margin-bottom:0">Decision ${n}</span>
         <button
@@ -647,7 +655,7 @@ function buildDecisionRow(n) {
         <input class="form-input decision-row-text" placeholder="What was decided?">
       </div>
       <div class="form-group">
-        <input class="form-input decision-row-owner" placeholder="→ Owner / action">
+        <input class="form-input decision-row-owner" placeholder="Owner / action">
       </div>
     </div>
   `;
@@ -671,7 +679,7 @@ window.removeDecisionRow = function (n) {
 };
 
 function updateRemoveButtons() {
-  const rows = document.querySelectorAll(".decision-row");
+  const rows = document.querySelectorAll("#decisionRowsContainer .decision-row");
   rows.forEach((row) => {
     const btn = row.querySelector(".btn-remove-row");
     if (btn) btn.style.display = rows.length > 1 ? "flex" : "none";
@@ -710,12 +718,12 @@ window.saveModal = async function () {
 
     else if (modalMode === "decisions") {
       const meetingTitle = document.getElementById("f_mtitle").value.trim();
-      const meetingDate  = document.getElementById("f_mdate").value;
+      const meetingDate  = document.getElementById("f_mdate").value || todayStr();
       if (!meetingTitle) { alert("Meeting title is required."); return; }
 
       // Collect all dynamically added decision rows
       const items = [];
-      document.querySelectorAll(".decision-row").forEach((row) => {
+      document.querySelectorAll("#decisionRowsContainer .decision-row").forEach((row) => {
         const text  = row.querySelector(".decision-row-text")?.value.trim();
         const owner = row.querySelector(".decision-row-owner")?.value.trim();
         if (text) items.push({ id: uid(), text, owner: owner || "" });

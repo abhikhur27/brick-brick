@@ -281,7 +281,7 @@
           </div>
         </div>
 
-        <form class="card contact-form" id="contactForm" novalidate onsubmit="return false">
+        <form class="card contact-form" id="contactForm" novalidate>
 
           <!-- Honeypot: NO name attribute — can never appear in any form POST or URL.
                Off-screen positioning (not display:none) so crawlers still see it. -->
@@ -315,7 +315,7 @@
             <textarea id="cfMessage" rows="4" placeholder="Website, automation, dashboard, portal, or something adjacent"></textarea>
           </label>
 
-          <button type="button" class="button primary full" id="cfSubmitBtn">Send inquiry</button>
+          <button type="submit" class="button primary full" id="cfSubmitBtn">Send inquiry</button>
 
           <p class="form-status" id="cfStatus" aria-live="polite"></p>
 
@@ -331,7 +331,7 @@
       <a href="portal.html">Open team portal</a>
     </div>
   </footer>
-  <!-- Required: loads Firebase, Web3Forms handler, nav, and footer year -->
+  <!-- Required: loads nav, contact webhook handler, and footer year -->
   <script type="module" src="main.js"></script>
 </body>
 </html>

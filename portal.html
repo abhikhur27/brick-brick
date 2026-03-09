@@ -43,6 +43,9 @@
       <div class="nav-item" data-page="decisions" onclick="showPage('decisions', this)">
         <span class="nav-icon">◎</span> Decisions Log
       </div>
+      <div class="nav-item" onclick="openSalesPlaybook()">
+        <span class="nav-icon">#</span> Sales Playbook
+      </div>
     </nav>
     <div class="sidebar-footer">
       <div class="signed-in-as" id="signedInAs">Signed in</div>
@@ -55,6 +58,7 @@
     <div class="topbar">
       <div class="page-title" id="pageTitle">PIPELINE</div>
       <div class="topbar-right">
+        <button class="btn btn-ghost" onclick="openSalesPlaybook()">Playbook</button>
         <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
         <button class="btn btn-primary" onclick="openAddModal()">+ Add</button>
       </div>
