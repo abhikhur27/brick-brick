@@ -286,7 +286,7 @@
           cfHoneypot is visually hidden — humans never fill it; bots do.
           cfStatus shows submission result inline without a page reload.
         -->
-        <form class="card contact-form" id="contactForm" novalidate>
+        <form class="card contact-form" id="contactForm" novalidate onsubmit="return false">
 
           <!-- Honeypot: hidden from humans, catches bots -->
           <input
@@ -320,7 +320,7 @@
             <textarea id="cfMessage" rows="4" placeholder="Website, automation, dashboard, portal, or something adjacent"></textarea>
           </label>
 
-          <button type="submit" class="button primary full" id="cfSubmitBtn">Send inquiry</button>
+          <button type="button" class="button primary full" id="cfSubmitBtn">Send inquiry</button>
 
           <!-- Inline status message — shown after submission -->
           <p class="form-status" id="cfStatus" aria-live="polite"></p>

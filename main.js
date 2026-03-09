@@ -14,7 +14,7 @@ const db  = getFirestore(app);
 // destination email. It cannot read submissions, change your account, or be
 // used to send to other addresses. Safe to embed in client-side JS.
 // Replace the placeholder below with your real key from web3forms.com/access.
-const WEB3FORMS_KEY = "945ebcbf-b856-41d0-919e-f5d39418ea06";
+const WEB3FORMS_KEY = "REPLACE_WITH_YOUR_WEB3FORMS_ACCESS_KEY";
 
 // ─── NAV MENU ─────────────────────────────────────────────────────────────────
 const menuToggle = document.getElementById("menuToggle");
@@ -36,9 +36,8 @@ const contactForm = document.getElementById("contactForm");
 const cfStatus    = document.getElementById("cfStatus");
 const cfSubmitBtn = document.getElementById("cfSubmitBtn");
 
-if (contactForm) {
-  contactForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
+if (contactForm && cfSubmitBtn) {
+  cfSubmitBtn.addEventListener("click", async () => {
 
     // Read field values — IDs match the updated index.html
     const name    = document.getElementById("cfName").value.trim();
