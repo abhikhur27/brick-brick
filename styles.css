@@ -414,3 +414,10 @@ img { display: block; max-width: 100%; }
   .section { padding: 72px 0; }
   .footer-wrap { flex-direction: column; align-items: flex-start; }
 }
+
+.field-optional {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: 4px;
+}

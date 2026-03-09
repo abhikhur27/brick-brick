@@ -44,6 +44,7 @@ if (contactForm) {
     const name    = document.getElementById("cfName").value.trim();
     const email   = document.getElementById("cfEmail").value.trim();
     const company = document.getElementById("cfCompany").value.trim();
+    const phone   = document.getElementById("cfPhone").value.trim();
     const message = document.getElementById("cfMessage").value.trim();
     // Honeypot — if filled, a bot submitted the form; silently reject
     const honeypot = document.getElementById("cfHoneypot").value;
@@ -76,6 +77,7 @@ if (contactForm) {
         name,
         email,
         company:      company || "—",
+        phone:        phone   || "—",
         message:      message || "No message provided.",
         // Tell Web3Forms not to send their default confirmation email to sender
         // (we're not promising that to users)
@@ -102,6 +104,7 @@ if (contactForm) {
         name,
         email,
         company:      company || "",
+        phone:        phone   || "",
         message:      message || "",
         submittedAt:  serverTimestamp(),
         emailRelayed: emailSent,
