@@ -3,7 +3,7 @@ import { initializeApp }          from "https://www.gstatic.com/firebasejs/10.12
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc,
-         onSnapshot, serverTimestamp, query, orderBy }
+         onSnapshot, serverTimestamp, query, orderBy, runTransaction }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { firebaseConfig }          from "./firebase-config.js";
 
@@ -37,6 +37,9 @@ let taskSortAsc   = true;
 let unsubPipeline   = null;
 let unsubTasks      = null;
 let unsubDecisions  = null;
+let unsubContactSubmissions = null;
+
+const syncingSubmissionIds = new Set();
 
 // ─── MODAL STATE ─────────────────────────────────────────────────────────────
 let modalMode    = "pipeline";
@@ -67,6 +70,7 @@ window.doLogout = async function () {
   if (unsubPipeline)  unsubPipeline();
   if (unsubTasks)     unsubTasks();
   if (unsubDecisions) unsubDecisions();
+  if (unsubContactSubmissions) unsubContactSubmissions();
   await signOut(auth);
 };
 
@@ -108,6 +112,69 @@ function friendlyAuthError(code) {
   return map[code] || "Login failed. Check your credentials.";
 }
 
+function inferServiceType(message) {
+  const text = String(message || "").toLowerCase();
+  if (text.includes("workflow") || text.includes("automation") || text.includes("ai")) {
+    return "AI Workflow";
+  }
+  if (text.includes("website") || text.includes("site")) {
+    return "Website Build";
+  }
+  return "Other";
+}
+
+function buildSubmissionNote(data) {
+  return [
+    "Inbound website contact form.",
+    `Name: ${data.name || "-"}`,
+    `Email: ${data.email || "-"}`,
+    `Phone: ${data.phone || "-"}`,
+    "",
+    "Message:",
+    data.message || "(no message provided)",
+  ].join("\n");
+}
+
+async function syncSubmissionToPipeline(submissionDoc) {
+  if (!submissionDoc?.id) return;
+  if (syncingSubmissionIds.has(submissionDoc.id)) return;
+  syncingSubmissionIds.add(submissionDoc.id);
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const submissionRef = doc(db, "contact_submissions", submissionDoc.id);
+      const freshSnap = await tx.get(submissionRef);
+      if (!freshSnap.exists()) return;
+
+      const data = freshSnap.data();
+      if (data.pipelineId) return;
+
+      const leadRef = doc(collection(db, "pipeline"));
+      tx.set(leadRef, {
+        title: (data.company || data.name || "Website Inquiry").trim(),
+        company: data.company || "",
+        contact: data.email || data.name || "",
+        service: inferServiceType(data.message),
+        status: "leads",
+        note: buildSubmissionNote(data),
+        source: "website-contact-form",
+        sourceSubmissionId: submissionDoc.id,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(submissionRef, {
+        pipelineId: leadRef.id,
+        importedToPipelineAt: serverTimestamp(),
+      });
+    });
+  } catch (err) {
+    console.error("syncSubmissionToPipeline:", err);
+  } finally {
+    syncingSubmissionIds.delete(submissionDoc.id);
+  }
+}
+
 // ─── REAL-TIME LISTENERS ──────────────────────────────────────────────────────
 function startListeners() {
   unsubPipeline = onSnapshot(
@@ -147,12 +214,27 @@ function startListeners() {
       );
     }
   );
+
+  // Promote contact form submissions into Pipeline leads.
+  unsubContactSubmissions = onSnapshot(
+    query(collection(db, "contact_submissions"), orderBy("submittedAt", "asc")),
+    (snap) => {
+      snap.docs.forEach((submissionDoc) => {
+        const data = submissionDoc.data();
+        if (!data.pipelineId) {
+          void syncSubmissionToPipeline(submissionDoc);
+        }
+      });
+    },
+    (err) => console.error("Contact submissions sync error:", err)
+  );
 }
 
 window.refreshAll = function () {
   if (unsubPipeline)  unsubPipeline();
   if (unsubTasks)     unsubTasks();
   if (unsubDecisions) unsubDecisions();
+  if (unsubContactSubmissions) unsubContactSubmissions();
   startListeners();
 };
 

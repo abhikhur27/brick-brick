@@ -1,4 +1,11 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, collection, addDoc, serverTimestamp }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { firebaseConfig } from "./firebase-config.js";
+
 const MAKE_WEBHOOK_URL = "https://hook.us2.make.com/6r8c9mwbh7yfej1erffgpidbwsfy8mmw";
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 const menuToggle = document.getElementById("menuToggle");
 const mobileMenu = document.getElementById("mobileMenu");
@@ -60,6 +67,17 @@ if (contactForm && cfSubmitBtn) {
       if (!response.ok) {
         throw new Error(`Webhook request failed with status ${response.status}`);
       }
+
+      // Queue the lead for automatic import into the portal pipeline.
+      await addDoc(collection(db, "contact_submissions"), {
+        name,
+        email,
+        phone,
+        company,
+        message,
+        submittedAt: serverTimestamp(),
+        source: "website-contact-form",
+      });
 
       contactForm.reset();
       showStatus("Message received - we'll follow up within one business day.", false);
