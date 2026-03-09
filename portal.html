@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Brick Brick | Team Workspace</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="portal.css">
+</head>
+<body>
+
+<!-- ─── LOGIN SCREEN ─────────────────────────────── -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-brand">BRICK BRICK</div>
+    <div class="login-sub">Team Workspace</div>
+    <div class="login-label">Email</div>
+    <input class="login-input" type="email" id="loginEmail" placeholder="you@brick-brick.org" autocomplete="email">
+    <div class="login-label">Password</div>
+    <input class="login-input" type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">ENTER WORKSPACE</button>
+    <div class="login-error" id="loginError"></div>
+    <a href="/" class="back-link">← Back to site</a>
+  </div>
+</div>
+
+<!-- ─── APP (hidden until authenticated) ─────────── -->
+<div id="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-name">BRICK BRICK</div>
+      <div class="brand-sub">Team Workspace</div>
+    </div>
+    <nav class="nav">
+      <div class="nav-label">Workspace</div>
+      <div class="nav-item active" data-page="pipeline" onclick="showPage('pipeline', this)">
+        <span class="nav-icon">◈</span> Pipeline
+      </div>
+      <div class="nav-item" data-page="tasks" onclick="showPage('tasks', this)">
+        <span class="nav-icon">▣</span> Tasks
+      </div>
+      <div class="nav-item" data-page="decisions" onclick="showPage('decisions', this)">
+        <span class="nav-icon">◎</span> Decisions Log
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="signed-in-as" id="signedInAs">Signed in</div>
+      <button class="logout-btn" onclick="doLogout()">← Log Out</button>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="main">
+
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div>
+        <div class="page-title" id="pageTitle">PIPELINE</div>
+      </div>
+      <div class="topbar-right">
+        <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
+        <button class="btn btn-primary" onclick="openAddModal()">+ Add</button>
+      </div>
+    </div>
+
+    <!-- TAB NAV -->
+    <div class="top-nav">
+      <div class="top-nav-item active" id="tnav-pipeline" onclick="showPage('pipeline', this, 'tnav')">◈ Pipeline</div>
+      <div class="top-nav-item" id="tnav-tasks" onclick="showPage('tasks', this, 'tnav')">▣ Tasks</div>
+      <div class="top-nav-item" id="tnav-decisions" onclick="showPage('decisions', this, 'tnav')">◎ Decisions Log</div>
+    </div>
+
+    <div class="content">
+
+      <!-- PIPELINE PAGE -->
+      <div class="page active" id="page-pipeline">
+        <div class="kanban" id="kanbanBoard"></div>
+      </div>
+
+      <!-- TASKS PAGE -->
+      <div class="page" id="page-tasks">
+        <div class="tasks-wrap">
+          <table class="tasks">
+            <thead>
+              <tr>
+                <th style="width:32px"></th>
+                <th>Task</th>
+                <th>Owner</th>
+                <th>Due Date</th>
+                <th>Priority</th>
+                <th style="width:60px"></th>
+              </tr>
+            </thead>
+            <tbody id="tasksBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- DECISIONS PAGE -->
+      <div class="page" id="page-decisions">
+        <div class="decisions-log" id="decisionsLog"></div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- ─── ADD / EDIT MODAL ─────────────────────────── -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modalBox">
+    <div class="modal-title" id="modalTitle">ADD LEAD</div>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="portal.js"></script>
+</body>
+</html>
