@@ -6,13 +6,15 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.5/fireba
 import { getAuth } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js';
 import { getFirestore } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
 
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: 'REPLACE_ME',
-  authDomain: 'REPLACE_ME.firebaseapp.com',
-  projectId: 'REPLACE_ME',
-  storageBucket: 'REPLACE_ME.appspot.com',
-  messagingSenderId: 'REPLACE_ME',
-  appId: 'REPLACE_ME'
+  apiKey: "AIzaSyD1BYQMWLvzbW8deoBhtSSd_qHPspMr4Yg",
+  authDomain: "brickbrickholdingsllc.firebaseapp.com",
+  projectId: "brickbrickholdingsllc",
+  storageBucket: "brickbrickholdingsllc.firebasestorage.app",
+  messagingSenderId: "365413140380",
+  appId: "1:365413140380:web:500fb692158f4c3050ea59",
+  measurementId: "G-4EFLQFLRHQ"
 };
 
 const app = initializeApp(firebaseConfig);
