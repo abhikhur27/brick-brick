@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Brick Brick Team Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="portal.css" />
+</head>
+<body>
+  <main class="portal-shell">
+    <section class="auth-panel card" id="authPanel">
+      <div class="portal-brand">
+        <span class="brand-mark">BB</span>
+        <div>
+          <strong>Brick Brick Portal</strong>
+          <small>Employee profiles and internal directory</small>
+        </div>
+      </div>
+
+      <h1>Sign in to continue</h1>
+      <p class="muted">This page is intended for team access. The UI is hosted statically, while access and data can be protected through Firebase Authentication and Firestore rules.</p>
+
+      <form id="loginForm" class="auth-form">
+        <label>
+          Email
+          <input type="email" id="loginEmail" placeholder="name@company.com" required>
+        </label>
+        <label>
+          Password
+          <input type="password" id="loginPassword" placeholder="••••••••" required>
+        </label>
+        <button type="submit" class="button primary full">Sign in</button>
+      </form>
+
+      <p class="status" id="authStatus">Waiting for sign-in.</p>
+      <a href="index.html" class="back-link">← Back to main website</a>
+    </section>
+
+    <section class="portal-content hidden" id="portalContent">
+      <header class="portal-header">
+        <div>
+          <p class="eyebrow">Internal directory</p>
+          <h2>Employee Profiles</h2>
+        </div>
+        <div class="portal-actions">
+          <span class="signed-in-as" id="signedInAs"></span>
+          <button class="button ghost" id="logoutBtn">Log out</button>
+        </div>
+      </header>
+
+      <div class="profiles-grid" id="profilesGrid">
+        <article class="profile-card card">
+          <img src="assets/placeholder-abhi.svg" alt="Profile placeholder" />
+          <h3>Sample Employee</h3>
+          <p class="role">Role placeholder</p>
+          <p>Once connected to Firestore, this area can render employee bios, contact info, specialties, and internal notes.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="firebase-config.js"></script>
+  <script type="module" src="portal.js"></script>
+</body>
+</html>

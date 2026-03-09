@@ -1,0 +1,131 @@
+:root {
+  --bg: #061019;
+  --panel: rgba(255, 255, 255, 0.06);
+  --line: rgba(255, 255, 255, 0.1);
+  --text: #f5f7fb;
+  --muted: #9ba8b8;
+  --accent: #7dd3fc;
+  --accent-2: #9ef4d7;
+  --radius: 22px;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 15% 10%, rgba(125, 211, 252, 0.12), transparent 25%),
+    linear-gradient(180deg, #061019, #09121d);
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 55px rgba(0,0,0,0.25);
+}
+.portal-shell {
+  width: min(1160px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 4rem 0;
+}
+.auth-panel {
+  width: min(540px, 100%);
+  margin: 0 auto;
+  padding: 2rem;
+}
+.portal-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+.brand-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, rgba(125, 211, 252, 0.22), rgba(158, 244, 215, 0.22));
+  border: 1px solid var(--line);
+  font-weight: 800;
+}
+.portal-brand small,
+.muted,
+.status,
+.role,
+.signed-in-as { color: var(--muted); }
+.auth-panel h1 { margin: 0 0 0.75rem; }
+.auth-form {
+  display: grid;
+  gap: 1rem;
+  margin: 1.5rem 0 1rem;
+}
+.auth-form label,
+.profile-card p { line-height: 1.6; }
+.auth-form input {
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  font: inherit;
+}
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.9rem 1.2rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 600;
+}
+.button.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border: none;
+  color: #061019;
+}
+.button.full { width: 100%; }
+.back-link { display: inline-block; margin-top: 1rem; color: var(--muted); }
+.hidden { display: none; }
+.portal-content { display: grid; gap: 1.5rem; }
+.portal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.portal-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.eyebrow {
+  margin: 0 0 0.35rem;
+  color: var(--accent-2);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.8rem;
+}
+.profiles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+.profile-card {
+  padding: 1.25rem;
+}
+.profile-card img {
+  width: 84px;
+  height: 84px;
+  border-radius: 20px;
+  object-fit: cover;
+  margin-bottom: 1rem;
+  border: 1px solid var(--line);
+}
+@media (max-width: 720px) {
+  .portal-shell { padding: 2rem 0; }
+  .portal-header { flex-direction: column; align-items: flex-start; }
+}
