@@ -1,89 +1,294 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Welcome to Firebase Hosting</title>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Brick Brick builds websites, AI workflows, and lightweight software systems for businesses that want better operations and a stronger online presence." />
+  <title>Brick Brick | Websites, AI Workflows, and Digital Systems</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav-wrap">
+      <a href="#top" class="brand">
+        <span class="brand-mark">BB</span>
+        <span class="brand-text">
+          <strong>Brick Brick</strong>
+          <small>B2B SaaS & digital systems</small>
+        </span>
+      </a>
 
-    <!-- update the version number as needed -->
-    <script defer src="/__/firebase/12.10.0/firebase-app-compat.js"></script>
-    <!-- include only the Firebase features as you need -->
-    <script defer src="/__/firebase/12.10.0/firebase-auth-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-database-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-firestore-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-functions-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-messaging-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-storage-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-analytics-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-remote-config-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-performance-compat.js"></script>
-    <!-- 
-      initialize the SDK after all desired features are loaded, set useEmulator to false
-      to avoid connecting the SDK to running emulators.
-    -->
-    <script defer src="/__/firebase/init.js?useEmulator=true"></script>
+      <nav class="nav-links">
+        <a href="#services">Services</a>
+        <a href="#process">Process</a>
+        <a href="#team">About</a>
+        <a href="#contact">Contact</a>
+        <a href="portal.html" class="nav-button secondary">Team Portal</a>
+      </nav>
 
-    <style media="screen">
-      body { background: #ECEFF1; color: rgba(0,0,0,0.87); font-family: Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
-      #message { background: white; max-width: 360px; margin: 100px auto 16px; padding: 32px 24px; border-radius: 3px; }
-      #message h2 { color: #ffa100; font-weight: bold; font-size: 16px; margin: 0 0 8px; }
-      #message h1 { font-size: 22px; font-weight: 300; color: rgba(0,0,0,0.6); margin: 0 0 16px;}
-      #message p { line-height: 140%; margin: 16px 0 24px; font-size: 14px; }
-      #message a { display: block; text-align: center; background: #039be5; text-transform: uppercase; text-decoration: none; color: white; padding: 16px; border-radius: 4px; }
-      #message, #message a { box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
-      #load { color: rgba(0,0,0,0.4); text-align: center; font-size: 13px; }
-      @media (max-width: 600px) {
-        body, #message { margin-top: 0; background: white; box-shadow: none; }
-        body { border-top: 16px solid #ffa100; }
-      }
-    </style>
-  </head>
-  <body>
-    <div id="message">
-      <h2>Welcome</h2>
-      <h1>Firebase Hosting Setup Complete</h1>
-      <p>You're seeing this because you've successfully setup Firebase Hosting. Now it's time to go build something extraordinary!</p>
-      <a target="_blank" href="https://firebase.google.com/docs/hosting/">Open Hosting Documentation</a>
+      <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">☰</button>
     </div>
-    <p id="load">Firebase SDK Loading&hellip;</p>
 
-    <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        const loadEl = document.querySelector('#load');
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-        // // The Firebase SDK is initialized and available here!
-        //
-        // firebase.auth().onAuthStateChanged(user => { });
-        // firebase.database().ref('/path/to/ref').on('value', snapshot => { });
-        // firebase.firestore().doc('/foo/bar').get().then(() => { });
-        // firebase.functions().httpsCallable('yourFunction')().then(() => { });
-        // firebase.messaging().requestPermission().then(() => { });
-        // firebase.storage().ref('/path/to/ref').getDownloadURL().then(() => { });
-        // firebase.analytics(); // call to activate
-        // firebase.analytics().logEvent('tutorial_completed');
-        // firebase.performance(); // call to activate
-        //
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
+    <div class="mobile-menu" id="mobileMenu">
+      <a href="#services">Services</a>
+      <a href="#process">Process</a>
+      <a href="#team">About</a>
+      <a href="#contact">Contact</a>
+      <a href="portal.html">Team Portal</a>
+    </div>
+  </header>
 
-        try {
-          let app = firebase.app();
-          let features = [
-            'auth', 
-            'database', 
-            'firestore',
-            'functions',
-            'messaging', 
-            'storage', 
-            'analytics', 
-            'remoteConfig',
-            'performance',
-          ].filter(feature => typeof app[feature] === 'function');
-          loadEl.textContent = `Firebase SDK loaded with ${features.join(', ')}`;
-        } catch (e) {
-          console.error(e);
-          loadEl.textContent = 'Error loading the Firebase SDK, check the console.';
-        }
-      });
-    </script>
-  </body>
+  <main id="top">
+    <section class="hero section">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="eyebrow">Modern websites, AI workflows, and business systems</div>
+          <h1>We build the digital infrastructure that helps businesses look sharper and run faster.</h1>
+          <p class="hero-text">
+            Brick Brick creates business websites, personal brand websites, AI workflow automations, internal dashboards, and lightweight SaaS-style systems for companies that want clean execution without a bloated agency process.
+          </p>
+
+          <div class="hero-actions">
+            <a href="#contact" class="button primary">Book a discovery call</a>
+            <a href="#services" class="button ghost">See services</a>
+          </div>
+
+          <div class="hero-metrics">
+            <div class="metric-card">
+              <span class="metric-value">Fast</span>
+              <span class="metric-label">Prototype-first delivery</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-value">Clean</span>
+              <span class="metric-label">Modern, credible design</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-value">Useful</span>
+              <span class="metric-label">Systems tied to ROI</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-panel card glossy">
+          <div class="panel-label">What we build</div>
+          <div class="panel-stack">
+            <div class="stack-item">
+              <h3>Business Websites</h3>
+              <p>Professional sites that turn credibility into conversions.</p>
+            </div>
+            <div class="stack-item">
+              <h3>Personal Websites</h3>
+              <p>Portfolio, founder, and executive sites that actually look premium.</p>
+            </div>
+            <div class="stack-item">
+              <h3>AI Workflows</h3>
+              <p>Automations for intake, reporting, lead routing, document handling, and internal ops.</p>
+            </div>
+            <div class="stack-item">
+              <h3>Internal Tools</h3>
+              <p>Dashboards, portals, and lightweight software systems that remove manual work.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="services">
+      <div class="container">
+        <div class="section-heading">
+          <span class="section-kicker">Services</span>
+          <h2>Broad enough to serve a wide client base, focused enough to stay excellent.</h2>
+          <p>Everything here fits one lane: helping businesses and operators present themselves better online and execute work more efficiently.</p>
+        </div>
+
+        <div class="service-grid">
+          <article class="card service-card">
+            <span class="service-number">01</span>
+            <h3>Business Websites</h3>
+            <p>Modern sites for service businesses, agencies, consultants, operators, and local companies that need trust at first glance.</p>
+            <ul>
+              <li>Landing pages</li>
+              <li>Multi-page company sites</li>
+              <li>Lead capture optimization</li>
+            </ul>
+          </article>
+
+          <article class="card service-card">
+            <span class="service-number">02</span>
+            <h3>Personal & Portfolio Websites</h3>
+            <p>Founder, creative, student, and executive sites that package your work, story, and positioning cleanly.</p>
+            <ul>
+              <li>Personal brands</li>
+              <li>Portfolio sites</li>
+              <li>Resume upgrades</li>
+            </ul>
+          </article>
+
+          <article class="card service-card">
+            <span class="service-number">03</span>
+            <h3>AI Workflow Automation</h3>
+            <p>Small-to-mid-sized automations that reduce repetitive work and improve consistency across teams.</p>
+            <ul>
+              <li>Email triage</li>
+              <li>Lead scoring</li>
+              <li>Report generation</li>
+            </ul>
+          </article>
+
+          <article class="card service-card">
+            <span class="service-number">04</span>
+            <h3>Internal Dashboards & Portals</h3>
+            <p>Custom portals, employee pages, client dashboards, and internal workspaces for lightweight business operations.</p>
+            <ul>
+              <li>Employee directories</li>
+              <li>Client portals</li>
+              <li>Status dashboards</li>
+            </ul>
+          </article>
+
+          <article class="card service-card">
+            <span class="service-number">05</span>
+            <h3>Workflow Prototypes</h3>
+            <p>We mock up the workflow or software concept before you commit to a full build, so stakeholders can react to something real.</p>
+            <ul>
+              <li>UI/UX prototypes</li>
+              <li>Clickable demos</li>
+              <li>Scope planning</li>
+            </ul>
+          </article>
+
+          <article class="card service-card">
+            <span class="service-number">06</span>
+            <h3>Other Digital Systems</h3>
+            <p>Need something adjacent to this scope? If it improves online presence, internal execution, or digital operations, it probably fits.</p>
+            <ul>
+              <li>Forms and intake systems</li>
+              <li>CRM workflows</li>
+              <li>Automation consulting</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="process">
+      <div class="container">
+        <div class="section-heading">
+          <span class="section-kicker">Process</span>
+          <h2>Simple process. Fast movement. No agency theater.</h2>
+        </div>
+
+        <div class="process-grid">
+          <div class="card process-card">
+            <span>1</span>
+            <h3>Discovery</h3>
+            <p>We figure out the business goal, the friction point, and what success should look like.</p>
+          </div>
+          <div class="card process-card">
+            <span>2</span>
+            <h3>Prototype or direction</h3>
+            <p>We map the site, workflow, or system clearly before heavy execution starts.</p>
+          </div>
+          <div class="card process-card">
+            <span>3</span>
+            <h3>Build</h3>
+            <p>We deliver a clean, production-ready website or working workflow with modern UX.</p>
+          </div>
+          <div class="card process-card">
+            <span>4</span>
+            <h3>Refine</h3>
+            <p>We polish the final result, connect needed tools, and make sure it feels professional.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="team">
+      <div class="container">
+        <div class="section-heading">
+          <span class="section-kicker">About</span>
+          <h2>Small team, strong taste, execution-focused.</h2>
+          <p>Swap these placeholders with your real bios and images. The layout is ready for that from day one.</p>
+        </div>
+
+        <div class="team-grid">
+          <article class="card team-card">
+            <div class="avatar-frame"><img src="assets/placeholder-abhi.svg" alt="Abhi profile placeholder"></div>
+            <h3>Abhi</h3>
+            <p class="team-role">Co-Founder</p>
+            <p>Replace this with your bio, focus areas, and what you lead inside the business.</p>
+          </article>
+
+          <article class="card team-card">
+            <div class="avatar-frame"><img src="assets/placeholder-athan.svg" alt="Athan profile placeholder"></div>
+            <h3>Athan</h3>
+            <p class="team-role">Co-Founder</p>
+            <p>Replace this with Athan’s bio, strengths, and role in operations, outreach, or strategy.</p>
+          </article>
+
+          <article class="card team-card">
+            <div class="avatar-frame"><img src="assets/placeholder-chris.svg" alt="Chris profile placeholder"></div>
+            <h3>Chris</h3>
+            <p class="team-role">Co-Founder</p>
+            <p>Replace this with Chris’s bio, vertical ownership, and execution background.</p>
+          </article>
+
+          <article class="card team-card">
+            <div class="avatar-frame"><img src="assets/placeholder-jacob.svg" alt="Jacob profile placeholder"></div>
+            <h3>Jacob</h3>
+            <p class="team-role">Co-Founder</p>
+            <p>Replace this with Jacob’s bio, technical role, and what he drives across projects.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="contact">
+      <div class="container contact-grid">
+        <div>
+          <span class="section-kicker">Contact</span>
+          <h2>Want a site, workflow, or internal tool?</h2>
+          <p class="contact-copy">Put your real contact info here. For now, the button uses a simple mailto link so it works on GitHub Pages immediately.</p>
+          <div class="contact-list">
+            <div><strong>Email</strong><span>hello@brick-brick.org</span></div>
+            <div><strong>Location</strong><span>Dallas / Remote</span></div>
+            <div><strong>Best fit</strong><span>Businesses that want modern websites and better systems</span></div>
+          </div>
+        </div>
+
+        <form class="card contact-form" id="contactForm">
+          <label>
+            Name
+            <input type="text" id="name" placeholder="Your name" required>
+          </label>
+          <label>
+            Email
+            <input type="email" id="email" placeholder="Your email" required>
+          </label>
+          <label>
+            Company
+            <input type="text" id="company" placeholder="Company or brand">
+          </label>
+          <label>
+            What do you need?
+            <textarea id="message" rows="5" placeholder="Website, automation, dashboard, portal, or something adjacent"></textarea>
+          </label>
+          <button type="submit" class="button primary full">Send inquiry</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-wrap">
+      <p>© <span id="year"></span> Brick Brick. Built for GitHub Pages.</p>
+      <a href="portal.html">Open team portal</a>
+    </div>
+  </footer>
+
+  <script src="main.js"></script>
+</body>
 </html>
