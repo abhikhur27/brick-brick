@@ -11,8 +11,12 @@ const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
 
+// ─── ANTI-FLASH GUARD ────────────────────────────────────────────────────────
+// Body starts invisible; revealed after auth state resolves so there's never
+// a flash of the workspace before Firebase confirms the user is logged in.
+document.body.style.visibility = "hidden";
+
 // ─── COLUMN CONFIG ───────────────────────────────────────────────────────────
-// Firestore status value → display label
 const COLS = [
   { key: "leads",     label: "Leads"          },
   { key: "contacted", label: "In Conversation" },
@@ -20,20 +24,26 @@ const COLS = [
   { key: "closed",    label: "Closed"         },
 ];
 
-// ─── UNSUBSCRIBE HANDLES (prevent listener leaks on re-login) ────────────────
+// ─── STATE CACHES (updated by real-time listeners) ───────────────────────────
+let currentPipeline  = [];
+let currentTasks     = [];
+let currentDecisions = [];
+
+// ─── TASK SORT STATE ─────────────────────────────────────────────────────────
+let taskSortField = "due";     // "due" | "createdAt" | "priority" | "owner" | "done"
+let taskSortAsc   = true;
+
+// ─── LISTENER HANDLES ────────────────────────────────────────────────────────
 let unsubPipeline   = null;
 let unsubTasks      = null;
 let unsubDecisions  = null;
 
 // ─── MODAL STATE ─────────────────────────────────────────────────────────────
-let modalMode    = "pipeline"; // "pipeline" | "tasks" | "decisions"
-let modalContext = "";         // pre-fill status column when clicking "+ Add" per-column
+let modalMode    = "pipeline";
+let modalContext = "";
+let editingLeadId = null;   // ID of the lead currently open in detail modal
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
-/**
- * Called by the Login button (and Enter key on password field).
- * Exposed to window so inline onclick attributes in the HTML work.
- */
 window.doLogin = async function () {
   const email    = document.getElementById("loginEmail").value.trim();
   const password = document.getElementById("loginPassword").value;
@@ -46,7 +56,6 @@ window.doLogin = async function () {
 
   try {
     await signInWithEmailAndPassword(auth, email, password);
-    // onAuthStateChanged handles the UI transition
   } catch (err) {
     errEl.textContent = friendlyAuthError(err.code);
     btn.textContent   = "ENTER WORKSPACE";
@@ -55,39 +64,33 @@ window.doLogin = async function () {
 };
 
 window.doLogout = async function () {
-  // Detach Firestore listeners before signing out
   if (unsubPipeline)  unsubPipeline();
   if (unsubTasks)     unsubTasks();
   if (unsubDecisions) unsubDecisions();
   await signOut(auth);
 };
 
-// Support pressing Enter in the password field
 document.getElementById("loginPassword")?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") window.doLogin();
 });
 
-/**
- * Central auth-state watcher — this is the ONLY place that shows/hides the
- * login screen vs the app.  Both login success and logout flow through here.
- */
+// Central auth-state observer — the ONLY place that shows/hides login vs workspace.
 onAuthStateChanged(auth, (user) => {
+  // Reveal the page now that auth state is known (prevents flash)
+  document.body.style.visibility = "visible";
+
   if (user) {
-    // Hide login, show workspace
     document.getElementById("loginScreen").style.display = "none";
     document.getElementById("app").classList.add("visible");
 
-    const signedInEl = document.getElementById("signedInAs");
-    if (signedInEl) signedInEl.textContent = user.email;
+    const el = document.getElementById("signedInAs");
+    if (el) el.textContent = user.email;
 
-    // Start real-time Firestore listeners
     startListeners();
   } else {
-    // Show login, hide workspace
     document.getElementById("loginScreen").style.display = "flex";
     document.getElementById("app").classList.remove("visible");
 
-    // Reset login button state in case of logout-then-back
     const btn = document.getElementById("loginBtn");
     if (btn) { btn.textContent = "ENTER WORKSPACE"; btn.disabled = false; }
   }
@@ -95,58 +98,65 @@ onAuthStateChanged(auth, (user) => {
 
 function friendlyAuthError(code) {
   const map = {
-    "auth/invalid-email":        "Invalid email address.",
-    "auth/user-not-found":       "No account found with that email.",
-    "auth/wrong-password":       "Incorrect password.",
-    "auth/invalid-credential":   "Incorrect email or password.",
-    "auth/too-many-requests":    "Too many attempts — try again later.",
-    "auth/user-disabled":        "This account has been disabled.",
+    "auth/invalid-email":      "Invalid email address.",
+    "auth/user-not-found":     "No account found with that email.",
+    "auth/wrong-password":     "Incorrect password.",
+    "auth/invalid-credential": "Incorrect email or password.",
+    "auth/too-many-requests":  "Too many attempts — try again later.",
+    "auth/user-disabled":      "This account has been disabled.",
   };
   return map[code] || "Login failed. Check your credentials.";
 }
 
-// ─── REAL-TIME FIRESTORE LISTENERS ───────────────────────────────────────────
+// ─── REAL-TIME LISTENERS ──────────────────────────────────────────────────────
 function startListeners() {
-  // Pipeline — ordered by creation time
   unsubPipeline = onSnapshot(
     query(collection(db, "pipeline"), orderBy("createdAt", "asc")),
     (snap) => {
-      const cards = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      renderPipeline(cards);
+      currentPipeline = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderPipeline(currentPipeline);
     },
-    (err) => console.error("Pipeline listener error:", err)
+    (err) => console.error("Pipeline error:", err)
   );
 
-  // Tasks — ordered by due date
+  // Fetch all tasks; sort client-side so we can switch sort fields without re-querying
   unsubTasks = onSnapshot(
-    query(collection(db, "tasks"), orderBy("due", "asc")),
+    query(collection(db, "tasks"), orderBy("createdAt", "asc")),
     (snap) => {
-      const tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      renderTasks(tasks);
+      currentTasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderTasks(currentTasks);
     },
-    (err) => console.error("Tasks listener error:", err)
+    (err) => console.error("Tasks error:", err)
   );
 
-  // Decisions — most recent first
+  // Decisions ordered by real meetingDate (ISO string sorts lexicographically = chronologically)
   unsubDecisions = onSnapshot(
-    query(collection(db, "decisions"), orderBy("createdAt", "desc")),
+    query(collection(db, "decisions"), orderBy("meetingDate", "desc")),
     (snap) => {
-      const decisions = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      renderDecisions(decisions);
+      currentDecisions = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderDecisions(currentDecisions);
     },
-    (err) => console.error("Decisions listener error:", err)
+    (err) => {
+      // Fallback if old documents lack meetingDate — order by createdAt
+      unsubDecisions = onSnapshot(
+        query(collection(db, "decisions"), orderBy("createdAt", "desc")),
+        (snap) => {
+          currentDecisions = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          renderDecisions(currentDecisions);
+        }
+      );
+    }
   );
 }
 
 window.refreshAll = function () {
-  // Listeners are real-time, so a manual refresh just re-attaches them
   if (unsubPipeline)  unsubPipeline();
   if (unsubTasks)     unsubTasks();
   if (unsubDecisions) unsubDecisions();
   startListeners();
 };
 
-// ─── PIPELINE RENDER ─────────────────────────────────────────────────────────
+// ─── PIPELINE RENDER ──────────────────────────────────────────────────────────
 function renderPipeline(cards) {
   const board = document.getElementById("kanbanBoard");
   if (!board) return;
@@ -154,8 +164,7 @@ function renderPipeline(cards) {
 
   COLS.forEach(({ key, label }) => {
     const colCards = cards.filter((c) => c.status === key);
-
-    const colEl = document.createElement("div");
+    const colEl    = document.createElement("div");
     colEl.className = "kanban-col";
     colEl.innerHTML = `
       <div class="col-header">
@@ -170,24 +179,26 @@ function renderPipeline(cards) {
     const container = colEl.querySelector(`#col-${key}`);
     colCards.forEach((card) => {
       const tagClass =
-        card.service === "AI Workflow"    ? "tag-ai"  :
-        card.service === "Website Build"  ? "tag-web" : "tag-other";
+        card.service === "AI Workflow"   ? "tag-ai"  :
+        card.service === "Website Build" ? "tag-web" : "tag-other";
 
-      // Move-to buttons (all other columns)
       const moveButtons = COLS
         .filter((c) => c.key !== key)
-        .map((c) => `<button class="card-btn" onclick="moveCard('${card.id}','${c.key}')">${c.label}</button>`)
+        .map((c) => `<button class="card-btn" onclick="event.stopPropagation();moveCard('${card.id}','${c.key}')">${c.label}</button>`)
         .join("");
 
       const cardEl = document.createElement("div");
       cardEl.className = "card";
+      // Clicking the card body (not action buttons) opens detail modal
+      cardEl.addEventListener("click", () => openLeadDetail(card.id));
       cardEl.innerHTML = `
         <div class="card-title">${escHtml(card.title)}</div>
+        ${card.company ? `<div class="card-company">${escHtml(card.company)}</div>` : ""}
         <div class="card-meta">${escHtml(card.note || "")}</div>
         <span class="card-tag ${tagClass}">${escHtml(card.service || "")}</span>
         <div class="card-actions">
           ${moveButtons}
-          <button class="card-btn delete" onclick="deleteCard('${card.id}')">✕</button>
+          <button class="card-btn delete" onclick="event.stopPropagation();deleteCard('${card.id}')">✕</button>
         </div>
       `;
       container.appendChild(cardEl);
@@ -197,35 +208,154 @@ function renderPipeline(cards) {
 
 window.moveCard = async function (id, newStatus) {
   try {
-    await updateDoc(doc(db, "pipeline", id), { status: newStatus });
-  } catch (err) {
-    console.error("moveCard error:", err);
-  }
+    await updateDoc(doc(db, "pipeline", id), { status: newStatus, updatedAt: serverTimestamp() });
+  } catch (err) { console.error("moveCard:", err); }
 };
 
 window.deleteCard = async function (id) {
   if (!confirm("Delete this lead?")) return;
+  try { await deleteDoc(doc(db, "pipeline", id)); }
+  catch (err) { console.error("deleteCard:", err); }
+};
+
+// ─── LEAD DETAIL MODAL ────────────────────────────────────────────────────────
+window.openLeadDetail = function (id) {
+  const card = currentPipeline.find((c) => c.id === id);
+  if (!card) return;
+  editingLeadId = id;
+
+  const colOpts = COLS.map((c) =>
+    `<option value="${c.key}" ${c.key === card.status ? "selected" : ""}>${c.label}</option>`
+  ).join("");
+
+  const addedStr = card.createdAt?.toDate
+    ? card.createdAt.toDate().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+    : "—";
+
+  document.getElementById("leadDetailBody").innerHTML = `
+    <div class="detail-grid">
+      <div class="form-group">
+        <label class="form-label">Lead / Client Name</label>
+        <input class="form-input" id="ld_title" value="${escHtmlAttr(card.title || "")}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Company</label>
+        <input class="form-input" id="ld_company" value="${escHtmlAttr(card.company || "")}" placeholder="Company name">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contact Person</label>
+        <input class="form-input" id="ld_contact" value="${escHtmlAttr(card.contact || "")}" placeholder="Contact name / email">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Service Type</label>
+        <select class="form-select" id="ld_service">
+          <option value="AI Workflow"   ${card.service === "AI Workflow"   ? "selected" : ""}>AI Workflow</option>
+          <option value="Website Build" ${card.service === "Website Build" ? "selected" : ""}>Website Build</option>
+          <option value="Other"         ${card.service === "Other"         ? "selected" : ""}>Other</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-select" id="ld_status">${colOpts}</select>
+      </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Notes</label>
+        <textarea class="form-input form-textarea" id="ld_note" rows="4" placeholder="Context, requirements, next steps…">${escHtml(card.note || "")}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date Added</label>
+        <div class="detail-meta-value">${addedStr}</div>
+      </div>
+    </div>
+  `;
+
+  // Wire up delete button inside the detail modal
+  const delBtn = document.getElementById("leadDetailDeleteBtn");
+  delBtn.onclick = async () => {
+    if (!confirm("Permanently delete this lead?")) return;
+    await deleteCard(editingLeadId);
+    closeLeadDetail();
+  };
+
+  document.getElementById("leadDetailOverlay").classList.add("open");
+};
+
+window.saveLeadDetail = async function () {
+  if (!editingLeadId) return;
   try {
-    await deleteDoc(doc(db, "pipeline", id));
+    await updateDoc(doc(db, "pipeline", editingLeadId), {
+      title:     document.getElementById("ld_title").value.trim(),
+      company:   document.getElementById("ld_company").value.trim(),
+      contact:   document.getElementById("ld_contact").value.trim(),
+      service:   document.getElementById("ld_service").value,
+      status:    document.getElementById("ld_status").value,
+      note:      document.getElementById("ld_note").value.trim(),
+      updatedAt: serverTimestamp(),
+    });
+    closeLeadDetail();
   } catch (err) {
-    console.error("deleteCard error:", err);
+    console.error("saveLeadDetail:", err);
+    alert("Save failed: " + err.message);
   }
 };
 
-// ─── TASKS RENDER ────────────────────────────────────────────────────────────
+window.closeLeadDetail = function () {
+  document.getElementById("leadDetailOverlay").classList.remove("open");
+  editingLeadId = null;
+};
+
+document.getElementById("leadDetailOverlay")?.addEventListener("click", function (e) {
+  if (e.target === this) window.closeLeadDetail();
+});
+
+// ─── TASKS ────────────────────────────────────────────────────────────────────
+// Priority sort order helper
+const PRIORITY_ORDER = { High: 0, Mid: 1, Low: 2 };
+
+function sortedTasks(tasks) {
+  const arr = [...tasks];
+  arr.sort((a, b) => {
+    let va, vb;
+    switch (taskSortField) {
+      case "due":
+        va = a.due || "9999-99-99";
+        vb = b.due || "9999-99-99";
+        break;
+      case "createdAt":
+        va = a.createdAt?.seconds ?? 0;
+        vb = b.createdAt?.seconds ?? 0;
+        break;
+      case "priority":
+        va = PRIORITY_ORDER[a.priority] ?? 9;
+        vb = PRIORITY_ORDER[b.priority] ?? 9;
+        break;
+      case "owner":
+        va = (a.owner || "").toLowerCase();
+        vb = (b.owner || "").toLowerCase();
+        break;
+      case "done":
+        va = a.done ? 1 : 0;
+        vb = b.done ? 1 : 0;
+        break;
+      default:
+        va = vb = 0;
+    }
+    if (va < vb) return taskSortAsc ? -1 : 1;
+    if (va > vb) return taskSortAsc ?  1 : -1;
+    return 0;
+  });
+  return arr;
+}
+
 function renderTasks(tasks) {
   const tbody = document.getElementById("tasksBody");
   if (!tbody) return;
   tbody.innerHTML = "";
 
-  // Sort: incomplete first (by due date), completed at bottom
-  const sorted = [...tasks].sort((a, b) => {
-    if (!!a.done !== !!b.done) return a.done ? 1 : -1;
-    return (a.due || "").localeCompare(b.due || "");
-  });
+  const sorted = sortedTasks(tasks);
 
   if (!sorted.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="padding:32px;text-align:center">No tasks yet — add one above.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state" style="margin:24px 0">No tasks yet.</div></td></tr>`;
     return;
   }
 
@@ -237,6 +367,10 @@ function renderTasks(tasks) {
     const pClass    = task.priority === "High" ? "p-high" : task.priority === "Mid" ? "p-mid" : "p-low";
     const initials  = (task.owner || "?").split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
 
+    const addedStr = task.createdAt?.toDate
+      ? task.createdAt.toDate().toLocaleDateString("en-US", { month: "short", day: "numeric" })
+      : "—";
+
     tr.innerHTML = `
       <td><div class="checkbox ${task.done ? "checked" : ""}" onclick="toggleTask('${task.id}', ${!task.done})"></div></td>
       <td class="task-name">${escHtml(task.name)}</td>
@@ -247,6 +381,7 @@ function renderTasks(tasks) {
         </span>
       </td>
       <td><span class="date-text ${isOverdue ? "date-overdue" : ""}">${formatDate(task.due)}</span></td>
+      <td><span class="date-text">${addedStr}</span></td>
       <td><span class="priority ${pClass}">${task.priority || "—"}</span></td>
       <td><button class="card-btn delete" onclick="deleteTask('${task.id}')">✕</button></td>
     `;
@@ -254,65 +389,121 @@ function renderTasks(tasks) {
   });
 }
 
-window.toggleTask = async function (id, newDoneState) {
-  try {
-    await updateDoc(doc(db, "tasks", id), { done: newDoneState });
-  } catch (err) {
-    console.error("toggleTask error:", err);
+window.setSort = function (field, btnEl) {
+  if (taskSortField === field) {
+    taskSortAsc = !taskSortAsc;
+  } else {
+    taskSortField = field;
+    taskSortAsc   = true;
+    document.querySelectorAll(".sort-pill").forEach((p) => p.classList.remove("active"));
+    btnEl.classList.add("active");
   }
+  const dirBtn = document.getElementById("sortDirBtn");
+  if (dirBtn) dirBtn.textContent = taskSortAsc ? "↑" : "↓";
+  renderTasks(currentTasks);
+};
+
+window.toggleSortDir = function () {
+  taskSortAsc = !taskSortAsc;
+  const dirBtn = document.getElementById("sortDirBtn");
+  if (dirBtn) dirBtn.textContent = taskSortAsc ? "↑" : "↓";
+  renderTasks(currentTasks);
+};
+
+window.toggleTask = async function (id, newDone) {
+  try { await updateDoc(doc(db, "tasks", id), { done: newDone }); }
+  catch (err) { console.error("toggleTask:", err); }
 };
 
 window.deleteTask = async function (id) {
   if (!confirm("Delete this task?")) return;
-  try {
-    await deleteDoc(doc(db, "tasks", id));
-  } catch (err) {
-    console.error("deleteTask error:", err);
-  }
+  try { await deleteDoc(doc(db, "tasks", id)); }
+  catch (err) { console.error("deleteTask:", err); }
 };
 
-// ─── DECISIONS RENDER ────────────────────────────────────────────────────────
+// ─── DECISIONS ────────────────────────────────────────────────────────────────
+// Schema (each document):
+//   meetingTitle : string    — the meeting name / label
+//   meetingDate  : string    — ISO date "YYYY-MM-DD" for chronological sorting
+//   items        : Array<{ id: string, text: string, owner: string }>
+//   createdAt    : timestamp
+//
+// Per-item delete logic:
+//   • Remove the item from the items array.
+//   • If remaining items.length > 0  → updateDoc with filtered array.
+//   • If remaining items.length === 0 → deleteDoc (group becomes empty).
+
 function renderDecisions(decisions) {
   const log = document.getElementById("decisionsLog");
   if (!log) return;
   log.innerHTML = "";
 
   if (!decisions.length) {
-    log.innerHTML = `<div class="empty-state">No meetings logged yet. Add your first one above.</div>`;
+    log.innerHTML = `<div class="empty-state">No meetings logged yet.</div>`;
     return;
   }
 
   decisions.forEach((entry) => {
+    // Support legacy documents that stored meetingTitle/meetingDate in a single "date" field
+    const titleStr = entry.meetingTitle || entry.date || "Untitled Meeting";
+    const dateStr  = entry.meetingDate
+      ? formatDate(entry.meetingDate)
+      : (entry.date || "");
+
     const el = document.createElement("div");
     el.className = "decision-entry";
-    const items = (entry.items || []).map((item) => `
-      <div class="decision-item">
-        <div class="decision-text">${escHtml(item.text)}</div>
-        <div class="decision-owner">${escHtml(item.owner || "")}</div>
+
+    const itemsHtml = (entry.items || []).map((item) => `
+      <div class="decision-item" data-item-id="${item.id}">
+        <div class="decision-item-header">
+          <div class="decision-item-text-wrap">
+            <div class="decision-text">${escHtml(item.text)}</div>
+            <div class="decision-owner">${escHtml(item.owner || "")}</div>
+          </div>
+          <button
+            class="delete-entry-btn item-delete"
+            onclick="deleteDecisionItem('${entry.id}', '${item.id}')"
+            title="Delete this item"
+          >✕</button>
+        </div>
       </div>
     `).join("");
 
     el.innerHTML = `
       <div class="decision-date">
-        <span>${escHtml(entry.date)}</span>
-        <button class="delete-entry-btn" onclick="deleteDecision('${entry.id}')">Delete</button>
+        <div class="decision-date-left">
+          <span class="decision-title">${escHtml(titleStr)}</span>
+          ${dateStr ? `<span class="decision-date-tag">${dateStr}</span>` : ""}
+        </div>
       </div>
-      ${items}
+      ${itemsHtml}
     `;
     log.appendChild(el);
   });
 }
 
-window.deleteDecision = async function (id) {
-  if (!confirm("Delete this meeting log?")) return;
-  try {
-    await deleteDoc(doc(db, "decisions", id));
-  } catch (err) {
-    console.error("deleteDecision error:", err);
+/**
+ * Delete a single decision item from a meeting document.
+ * If no items remain, delete the whole document.
+ */
+window.deleteDecisionItem = async function (docId, itemId) {
+  const entry = currentDecisions.find((d) => d.id === docId);
+  if (!entry) return;
+
+  const remaining = (entry.items || []).filter((i) => i.id !== itemId);
+
+  if (remaining.length === 0) {
+    // Last item removed — ask before deleting the whole meeting entry
+    if (!confirm("This is the last item in this meeting entry. Delete the entire entry?")) return;
+    try { await deleteDoc(doc(db, "decisions", docId)); }
+    catch (err) { console.error("deleteDecisionItem (doc):", err); }
+  } else {
+    try { await updateDoc(doc(db, "decisions", docId), { items: remaining }); }
+    catch (err) { console.error("deleteDecisionItem (update):", err); }
   }
 };
 
-// ─── MODAL ────────────────────────────────────────────────────────────────────
+// ─── ADD MODAL ────────────────────────────────────────────────────────────────
 window.openAddModal = function (type, context) {
   modalMode    = type || currentPage;
   modalContext = context || "";
@@ -332,7 +523,7 @@ document.getElementById("modalOverlay")?.addEventListener("click", function (e) 
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") window.closeModal();
+  if (e.key === "Escape") { window.closeModal(); window.closeLeadDetail(); }
 });
 
 function getModalForm(mode) {
@@ -342,8 +533,16 @@ function getModalForm(mode) {
     ).join("");
     return `
       <div class="form-group">
-        <label class="form-label">Client / Lead Name</label>
+        <label class="form-label">Lead / Client Name</label>
         <input class="form-input" id="f_title" placeholder="e.g. Local coffee shop">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Company</label>
+        <input class="form-input" id="f_company" placeholder="Company name (optional)">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contact Person</label>
+        <input class="form-input" id="f_contact" placeholder="Name or email (optional)">
       </div>
       <div class="form-group">
         <label class="form-label">Service Type</label>
@@ -363,6 +562,7 @@ function getModalForm(mode) {
       </div>
     `;
   }
+
   if (mode === "tasks") {
     return `
       <div class="form-group">
@@ -387,11 +587,18 @@ function getModalForm(mode) {
       </div>
     `;
   }
+
   if (mode === "decisions") {
+    // Default date to today
+    const today = todayStr();
     return `
       <div class="form-group">
-        <label class="form-label">Meeting Title / Date</label>
-        <input class="form-input" id="f_date" placeholder="e.g. March 10, 2026 — Meeting #2">
+        <label class="form-label">Meeting Title</label>
+        <input class="form-input" id="f_mtitle" placeholder="e.g. Kickoff — Week 1">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Meeting Date</label>
+        <input class="form-input" type="date" id="f_mdate" value="${today}" style="color-scheme:dark">
       </div>
       <div class="form-group">
         <label class="form-label">Decision 1</label>
@@ -429,10 +636,13 @@ window.saveModal = async function () {
       if (!title) { alert("Lead name is required."); return; }
       await addDoc(collection(db, "pipeline"), {
         title,
+        company:   document.getElementById("f_company").value.trim(),
+        contact:   document.getElementById("f_contact").value.trim(),
         service:   document.getElementById("f_service").value,
         status:    document.getElementById("f_status").value,
         note:      document.getElementById("f_note").value.trim(),
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
     }
 
@@ -450,17 +660,21 @@ window.saveModal = async function () {
     }
 
     else if (modalMode === "decisions") {
-      const date = document.getElementById("f_date").value.trim();
-      if (!date) { alert("Meeting title/date is required."); return; }
+      const meetingTitle = document.getElementById("f_mtitle").value.trim();
+      const meetingDate  = document.getElementById("f_mdate").value;
+      if (!meetingTitle) { alert("Meeting title is required."); return; }
+
       const items = [];
       for (let i = 1; i <= 3; i++) {
         const text  = document.getElementById(`f_d${i}`)?.value.trim();
         const owner = document.getElementById(`f_o${i}`)?.value.trim();
-        if (text) items.push({ text, owner: owner || "" });
+        if (text) items.push({ id: uid(), text, owner: owner || "" });
       }
       if (!items.length) { alert("At least one decision is required."); return; }
+
       await addDoc(collection(db, "decisions"), {
-        date,
+        meetingTitle,
+        meetingDate,  // "YYYY-MM-DD" — real date for sorting
         items,
         createdAt: serverTimestamp(),
       });
@@ -468,49 +682,54 @@ window.saveModal = async function () {
 
     window.closeModal();
   } catch (err) {
-    console.error("saveModal error:", err);
+    console.error("saveModal:", err);
     alert("Save failed: " + err.message);
   }
 };
 
-// ─── PAGE NAVIGATION ─────────────────────────────────────────────────────────
+// ─── PAGE NAVIGATION ──────────────────────────────────────────────────────────
 let currentPage = "pipeline";
 
-window.showPage = function (name, el, source) {
+window.showPage = function (name, el) {
   currentPage = name;
-
   document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
   document.querySelectorAll(".nav-item").forEach((n) => n.classList.remove("active"));
   document.querySelectorAll(".top-nav-item").forEach((n) => n.classList.remove("active"));
 
   document.getElementById("page-" + name)?.classList.add("active");
 
-  // Sync sidebar + top nav
   const sidebarItem = document.querySelector(`.nav-item[data-page="${name}"]`);
   const topNavItem  = document.getElementById("tnav-" + name);
   if (sidebarItem) sidebarItem.classList.add("active");
   if (topNavItem)  topNavItem.classList.add("active");
 
   const titles = { pipeline: "PIPELINE", tasks: "TASKS", decisions: "DECISIONS LOG" };
-  const pageTitleEl = document.getElementById("pageTitle");
-  if (pageTitleEl) pageTitleEl.textContent = titles[name] || name.toUpperCase();
+  const el2    = document.getElementById("pageTitle");
+  if (el2) el2.textContent = titles[name] || name.toUpperCase();
 };
 
-// ─── UTILITIES ───────────────────────────────────────────────────────────────
+// ─── UTILITIES ────────────────────────────────────────────────────────────────
 function escHtml(str) {
-  return String(str)
+  return String(str ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
 
+// Alias for attribute contexts (same escaping, named for clarity)
+function escHtmlAttr(str) { return escHtml(str); }
+
 function formatDate(str) {
   if (!str) return "—";
   const d = new Date(str + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+  return new Date().toISOString().slice(0, 10);
+}
+
+function uid() {
+  return "_" + Math.random().toString(36).slice(2, 11);
 }

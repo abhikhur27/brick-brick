@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Brick Brick | Team Workspace</title>
+  <title>BrickBrick | Team Workspace</title>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="portal.css">
 </head>
 <body>
 
-<!-- ─── LOGIN SCREEN ─────────────────────────────── -->
+<!-- ─── LOGIN SCREEN ────────────────────────────────────────────────────────── -->
 <div id="loginScreen">
   <div class="login-box">
-    <div class="login-brand">BRICK BRICK</div>
+    <div class="login-brand">BRICKBRICK</div>
     <div class="login-sub">Team Workspace</div>
     <div class="login-label">Email</div>
     <input class="login-input" type="email" id="loginEmail" placeholder="you@brick-brick.org" autocomplete="email">
@@ -24,14 +24,13 @@
   </div>
 </div>
 
-<!-- ─── APP (hidden until authenticated) ─────────── -->
+<!-- ─── APP (hidden until authenticated) ────────────────────────────────────── -->
 <div id="app">
 
-  <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-name">BRICK BRICK</div>
-      <div class="brand-sub">Team Workspace</div>
+      <div class="brand-name">BRICKBRICK</div>
+      <div class="brand-sub">Operations</div>
     </div>
     <nav class="nav">
       <div class="nav-label">Workspace</div>
@@ -51,21 +50,16 @@
     </div>
   </aside>
 
-  <!-- MAIN CONTENT -->
   <main class="main">
 
-    <!-- TOPBAR -->
     <div class="topbar">
-      <div>
-        <div class="page-title" id="pageTitle">PIPELINE</div>
-      </div>
+      <div class="page-title" id="pageTitle">PIPELINE</div>
       <div class="topbar-right">
         <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
         <button class="btn btn-primary" onclick="openAddModal()">+ Add</button>
       </div>
     </div>
 
-    <!-- TAB NAV -->
     <div class="top-nav">
       <div class="top-nav-item active" id="tnav-pipeline" onclick="showPage('pipeline', this, 'tnav')">◈ Pipeline</div>
       <div class="top-nav-item" id="tnav-tasks" onclick="showPage('tasks', this, 'tnav')">▣ Tasks</div>
@@ -81,6 +75,16 @@
 
       <!-- TASKS PAGE -->
       <div class="page" id="page-tasks">
+        <div class="sort-bar">
+          <span class="sort-label">Sort</span>
+          <button class="sort-pill active" data-sort="due"       onclick="setSort('due',       this)">Due Date</button>
+          <button class="sort-pill"        data-sort="createdAt" onclick="setSort('createdAt', this)">Date Added</button>
+          <button class="sort-pill"        data-sort="priority"  onclick="setSort('priority',  this)">Priority</button>
+          <button class="sort-pill"        data-sort="owner"     onclick="setSort('owner',     this)">Owner</button>
+          <button class="sort-pill"        data-sort="done"      onclick="setSort('done',      this)">Status</button>
+          <button class="sort-dir" id="sortDirBtn" onclick="toggleSortDir()" title="Toggle ascending / descending">↑</button>
+        </div>
+
         <div class="tasks-wrap">
           <table class="tasks">
             <thead>
@@ -88,9 +92,10 @@
                 <th style="width:32px"></th>
                 <th>Task</th>
                 <th>Owner</th>
-                <th>Due Date</th>
+                <th>Due</th>
+                <th>Added</th>
                 <th>Priority</th>
-                <th style="width:60px"></th>
+                <th style="width:48px"></th>
               </tr>
             </thead>
             <tbody id="tasksBody"></tbody>
@@ -107,7 +112,7 @@
   </main>
 </div>
 
-<!-- ─── ADD / EDIT MODAL ─────────────────────────── -->
+<!-- ─── ADD MODAL ────────────────────────────────────────────────────────────── -->
 <div class="modal-overlay" id="modalOverlay">
   <div class="modal" id="modalBox">
     <div class="modal-title" id="modalTitle">ADD LEAD</div>
@@ -115,6 +120,19 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
       <button class="btn btn-primary" onclick="saveModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── LEAD DETAIL MODAL ────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="leadDetailOverlay">
+  <div class="modal modal-wide" id="leadDetailBox">
+    <div class="modal-title">LEAD DETAIL</div>
+    <div id="leadDetailBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeLeadDetail()">Close</button>
+      <button class="btn btn-danger" id="leadDetailDeleteBtn">Delete Lead</button>
+      <button class="btn btn-primary" onclick="saveLeadDetail()">Save Changes</button>
     </div>
   </div>
 </div>
