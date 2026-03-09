@@ -275,28 +275,23 @@
           <h2>Want a site, workflow, or internal tool built?</h2>
           <p class="contact-copy">Send us a message and we'll follow up within one business day.</p>
           <div class="contact-list">
-            <div><strong>Email</strong><span><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="54373b3a203537201436263d373f7936263d373f7a3b2633">[email&#160;protected]</a></span></div>
+            <div><strong>Email</strong><span><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="f99a96978d989a8db99b8b909a92d49b8b909a92d7968b9e">[email&#160;protected]</a></span></div>
             <div><strong>Location</strong><span>Dallas / Remote</span></div>
             <div><strong>Best fit</strong><span>Businesses that want modern websites and better internal systems</span></div>
           </div>
         </div>
 
-        <!--
-          Form fields use "cf" prefix IDs to avoid any collision with portal IDs.
-          cfHoneypot is visually hidden — humans never fill it; bots do.
-          cfStatus shows submission result inline without a page reload.
-        -->
         <form class="card contact-form" id="contactForm" novalidate onsubmit="return false">
 
-          <!-- Honeypot: hidden from humans, catches bots -->
+          <!-- Honeypot: NO name attribute — can never appear in any form POST or URL.
+               Off-screen positioning (not display:none) so crawlers still see it. -->
           <input
             type="text"
             id="cfHoneypot"
-            name="botcheck"
             tabindex="-1"
             autocomplete="off"
             aria-hidden="true"
-            style="display:none !important"
+            style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;"
           >
 
           <label>
@@ -312,7 +307,7 @@
             <input type="text" id="cfCompany" placeholder="Company or brand" autocomplete="organization">
           </label>
           <label>
-            Phone <span class="field-optional">(optional)</span>
+            <span class="label-row">Phone <span class="field-optional">(optional)</span></span>
             <input type="tel" id="cfPhone" placeholder="Your phone number" autocomplete="tel">
           </label>
           <label>
@@ -322,7 +317,6 @@
 
           <button type="button" class="button primary full" id="cfSubmitBtn">Send inquiry</button>
 
-          <!-- Inline status message — shown after submission -->
           <p class="form-status" id="cfStatus" aria-live="polite"></p>
 
         </form>
@@ -337,3 +331,7 @@
       <a href="portal.html">Open team portal</a>
     </div>
   </footer>
+  <!-- Required: loads Firebase, Web3Forms handler, nav, and footer year -->
+  <script type="module" src="main.js"></script>
+</body>
+</html>

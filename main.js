@@ -14,7 +14,7 @@ const db  = getFirestore(app);
 // destination email. It cannot read submissions, change your account, or be
 // used to send to other addresses. Safe to embed in client-side JS.
 // Replace the placeholder below with your real key from web3forms.com/access.
-const WEB3FORMS_KEY = "REPLACE_WITH_YOUR_WEB3FORMS_ACCESS_KEY";
+const WEB3FORMS_KEY = "945ebcbf-b856-41d0-919e-f5d39418ea06";
 
 // ─── NAV MENU ─────────────────────────────────────────────────────────────────
 const menuToggle = document.getElementById("menuToggle");
@@ -39,17 +39,17 @@ const cfSubmitBtn = document.getElementById("cfSubmitBtn");
 if (contactForm && cfSubmitBtn) {
   cfSubmitBtn.addEventListener("click", async () => {
 
-    // Read field values — IDs match the updated index.html
-    const name    = document.getElementById("cfName").value.trim();
-    const email   = document.getElementById("cfEmail").value.trim();
-    const company = document.getElementById("cfCompany").value.trim();
-    const phone   = document.getElementById("cfPhone").value.trim();
-    const message = document.getElementById("cfMessage").value.trim();
-    // Honeypot — if filled, a bot submitted the form; silently reject
+    // ── Read fields ────────────────────────────────────────────────────────────
+    const name     = document.getElementById("cfName").value.trim();
+    const email    = document.getElementById("cfEmail").value.trim();
+    const company  = document.getElementById("cfCompany").value.trim();
+    const phone    = document.getElementById("cfPhone").value.trim();
+    const message  = document.getElementById("cfMessage").value.trim();
+    // Honeypot: the input has NO name attribute so it can never appear in a URL.
+    // If it has a value, a browser auto-fill or bot filled it — silently reject.
     const honeypot = document.getElementById("cfHoneypot").value;
 
     if (honeypot) {
-      // Bot detected: fake success so bots don't retry
       showStatus("Message sent. We'll be in touch within one business day.", false);
       contactForm.reset();
       return;
@@ -62,41 +62,67 @@ if (contactForm && cfSubmitBtn) {
 
     setLoading(true);
 
-    // ── Step 1: Send email via Web3Forms ─────────────────────────────────────
-    // Web3Forms accepts a plain JSON POST. The access key routes the submission
-    // to the email address configured in your Web3Forms dashboard.
+    // ── Step 1: Send email via Web3Forms ──────────────────────────────────────
+    //
+    // Critical fields:
+    //   access_key  — your Web3Forms key (routes to your inbox)
+    //   subject     — includes name AND email so sender is always visible
+    //   from_name   — display name shown in the From header
+    //   replyto     — sets Reply-To so hitting Reply goes to the sender
+    //   redirect    — "false" (string) prevents ANY browser redirect
+    //   botcheck    — empty string confirms this is a real, non-bot submission
+    //   message     — body text includes all fields explicitly so they're
+    //                 readable regardless of how the email client renders headers
+    //
+    // The submitter's email is in BOTH the subject line AND the message body.
+    // This is the fix for the "protected" sender issue — some email clients
+    // suppress or obfuscate the Reply-To header, so embedding it in the body
+    // ensures you always see who sent the inquiry.
+
     let emailSent = false;
     try {
+      const bodyText = [
+        `From:    ${name} <${email}>`,
+        `Phone:   ${phone   || "—"}`,
+        `Company: ${company || "—"}`,
+        ``,
+        `Message:`,
+        message || "(no message provided)",
+      ].join("\n");
+
       const payload = {
-        access_key:   WEB3FORMS_KEY,
-        subject:      `New inquiry from ${name}`,
-        from_name:    "BrickBrick Contact Form",
-        // reply-to lets you hit Reply in Gmail and it goes to the sender
-        replyto:      email,
+        access_key: WEB3FORMS_KEY,
+        subject:    `New inquiry from ${name} <${email}>`,
+        from_name:  "BrickBrick Website",
+        replyto:    email,
+        redirect:   "false",    // must be the STRING "false", not boolean
+        botcheck:   "",          // empty string = confirmed non-bot to Web3Forms
         name,
         email,
-        company:      company || "—",
-        phone:        phone   || "—",
-        message:      message || "No message provided.",
-        // Tell Web3Forms not to send their default confirmation email to sender
-        // (we're not promising that to users)
-        botcheck:     "",
+        phone:      phone   || "—",
+        company:    company || "—",
+        message:    bodyText,
       };
 
       const res = await fetch("https://api.web3forms.com/submit", {
         method:  "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body:    JSON.stringify(payload),
+        headers: {
+          "Content-Type": "application/json",
+          "Accept":        "application/json",
+        },
+        body: JSON.stringify(payload),
       });
+
       const data = await res.json();
       emailSent = data.success === true;
+      if (!emailSent) console.warn("Web3Forms non-success response:", data);
     } catch (err) {
-      console.warn("Web3Forms request failed:", err);
+      console.warn("Web3Forms fetch failed:", err);
     }
 
     // ── Step 2: Save to Firestore for internal records ────────────────────────
-    // This is a direct client write to Firestore — no Cloud Functions, no Blaze.
-    // The contact_submissions collection is write-open (no auth required) per rules.
+    // Direct client write — no Cloud Functions, works on Spark plan.
+    // contact_submissions is write-open (no auth required) per firestore.rules.
     let firestoreSaved = false;
     try {
       await addDoc(collection(db, "contact_submissions"), {
@@ -119,7 +145,6 @@ if (contactForm && cfSubmitBtn) {
       contactForm.reset();
       showStatus("Message received — we'll follow up within one business day.", false);
     } else {
-      // Both paths failed — give a real fallback so the person isn't stuck
       showStatus(
         "Submission failed. Please email us directly at contact@brick-brick.org.",
         true

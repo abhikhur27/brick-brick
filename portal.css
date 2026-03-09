@@ -807,3 +807,58 @@ table.tasks tr:hover td { background: var(--surface); }
   .detail-grid { grid-template-columns: 1fr; }
   .sort-bar { gap: 5px; }
 }
+/* ─── DYNAMIC DECISION ROWS (modal) ─────────────────────────────────────── */
+.decisions-rows-header {
+  display: flex;
+  align-items: center;
+  margin: 4px 0 10px;
+}
+
+.decision-row {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.decision-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.btn-remove-row {
+  display: none; /* shown via JS once there are 2+ rows */
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--silver-dim);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.btn-remove-row:hover {
+  color: var(--red-soft);
+  border-color: rgba(192,57,43,0.4);
+}
+
+.add-decision-row-btn {
+  width: 100%;
+  margin-top: 2px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  border-style: dashed;
+  justify-content: center;
+}
+.add-decision-row-btn:hover {
+  color: var(--silver);
+  border-color: var(--silver-dim);
+  border-style: dashed;
+}

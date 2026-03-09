@@ -510,8 +510,17 @@ window.openAddModal = function (type, context) {
 
   const titles = { pipeline: "ADD LEAD", tasks: "ADD TASK", decisions: "LOG MEETING" };
   document.getElementById("modalTitle").textContent = titles[modalMode] || "ADD";
-  document.getElementById("modalBody").innerHTML    = getModalForm(modalMode);
+
+  // Reset counter BEFORE rendering so row IDs start at 1
+  decisionRowCount = 0;
+  document.getElementById("modalBody").innerHTML = getModalForm(modalMode);
   document.getElementById("modalOverlay").classList.add("open");
+
+  // For decisions: add the first row programmatically via addDecisionRow()
+  // so the initial row uses the exact same code path as every subsequent row.
+  if (modalMode === "decisions") {
+    addDecisionRow();
+  }
 };
 
 window.closeModal = function () {
@@ -589,8 +598,12 @@ function getModalForm(mode) {
   }
 
   if (mode === "decisions") {
-    // Default date to today
     const today = todayStr();
+    // NOTE: decisionRowsContainer starts EMPTY.
+    // openAddModal() calls addDecisionRow() after rendering to inject the first
+    // row programmatically — the same code path every subsequent row uses.
+    // This avoids calling buildDecisionRow() inside a template literal, which
+    // caused intermittent issues with function evaluation order.
     return `
       <div class="form-group">
         <label class="form-label">Meeting Title</label>
@@ -600,33 +613,69 @@ function getModalForm(mode) {
         <label class="form-label">Meeting Date</label>
         <input class="form-input" type="date" id="f_mdate" value="${today}" style="color-scheme:dark">
       </div>
-      <div class="form-group">
-        <label class="form-label">Decision 1</label>
-        <input class="form-input" id="f_d1" placeholder="What was decided?">
+      <div class="decisions-rows-header">
+        <span class="form-label" style="margin-bottom:0">Decisions</span>
       </div>
-      <div class="form-group">
-        <label class="form-label">Owner / Action 1</label>
-        <input class="form-input" id="f_o1" placeholder="→ Who does what">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Decision 2 (optional)</label>
-        <input class="form-input" id="f_d2">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Owner / Action 2</label>
-        <input class="form-input" id="f_o2">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Decision 3 (optional)</label>
-        <input class="form-input" id="f_d3">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Owner / Action 3</label>
-        <input class="form-input" id="f_o3">
-      </div>
+      <div id="decisionRowsContainer"></div>
+      <button type="button" class="btn btn-ghost add-decision-row-btn" onclick="addDecisionRow()">
+        ＋ Add another decision
+      </button>
     `;
   }
   return "";
+}
+
+// ─── DYNAMIC DECISION ROWS ───────────────────────────────────────────────────
+// Each row is a self-contained block with a text field, owner field, and
+// a remove button (hidden on the first row if it's the only one).
+
+let decisionRowCount = 1;
+
+function buildDecisionRow(n) {
+  return `
+    <div class="decision-row" id="drow-${n}">
+      <div class="decision-row-header">
+        <span class="form-label" style="margin-bottom:0">Decision ${n}</span>
+        <button
+          type="button"
+          class="btn-remove-row"
+          onclick="removeDecisionRow(${n})"
+          title="Remove this decision"
+        >✕</button>
+      </div>
+      <div class="form-group" style="margin-bottom:8px">
+        <input class="form-input decision-row-text" placeholder="What was decided?">
+      </div>
+      <div class="form-group">
+        <input class="form-input decision-row-owner" placeholder="→ Owner / action">
+      </div>
+    </div>
+  `;
+}
+
+window.addDecisionRow = function () {
+  decisionRowCount++;
+  const container = document.getElementById("decisionRowsContainer");
+  if (!container) return;
+  const div = document.createElement("div");
+  div.innerHTML = buildDecisionRow(decisionRowCount);
+  container.appendChild(div.firstElementChild);
+  // Show all remove buttons once there are 2+ rows
+  updateRemoveButtons();
+};
+
+window.removeDecisionRow = function (n) {
+  const row = document.getElementById("drow-" + n);
+  if (row) row.remove();
+  updateRemoveButtons();
+};
+
+function updateRemoveButtons() {
+  const rows = document.querySelectorAll(".decision-row");
+  rows.forEach((row) => {
+    const btn = row.querySelector(".btn-remove-row");
+    if (btn) btn.style.display = rows.length > 1 ? "flex" : "none";
+  });
 }
 
 window.saveModal = async function () {
@@ -664,17 +713,18 @@ window.saveModal = async function () {
       const meetingDate  = document.getElementById("f_mdate").value;
       if (!meetingTitle) { alert("Meeting title is required."); return; }
 
+      // Collect all dynamically added decision rows
       const items = [];
-      for (let i = 1; i <= 3; i++) {
-        const text  = document.getElementById(`f_d${i}`)?.value.trim();
-        const owner = document.getElementById(`f_o${i}`)?.value.trim();
+      document.querySelectorAll(".decision-row").forEach((row) => {
+        const text  = row.querySelector(".decision-row-text")?.value.trim();
+        const owner = row.querySelector(".decision-row-owner")?.value.trim();
         if (text) items.push({ id: uid(), text, owner: owner || "" });
-      }
+      });
       if (!items.length) { alert("At least one decision is required."); return; }
 
       await addDoc(collection(db, "decisions"), {
         meetingTitle,
-        meetingDate,  // "YYYY-MM-DD" — real date for sorting
+        meetingDate,
         items,
         createdAt: serverTimestamp(),
       });
