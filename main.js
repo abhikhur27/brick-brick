@@ -34,6 +34,6 @@ Project details:
 ${message}`
     );
 
-    window.location.href = `mailto:hello@brick-brick.org?subject=${subject}&body=${body}`;
+    window.location.href = `mailto:contact@brick-brick.org?subject=${subject}&body=${body}`;
   });
 }
