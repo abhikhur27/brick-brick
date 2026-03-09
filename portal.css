@@ -413,6 +413,18 @@ body::before {
   min-height: 300px;
 }
 
+.kanban-dropzone {
+  min-height: 56px;
+  border-radius: 6px;
+  outline: 1px dashed transparent;
+  outline-offset: 3px;
+  transition: outline-color 0.15s ease, background 0.15s ease;
+}
+.kanban-dropzone.is-drop-target {
+  outline-color: rgba(196,196,196,0.45);
+  background: rgba(196,196,196,0.06);
+}
+
 .col-header {
   display: flex;
   align-items: center;
@@ -443,8 +455,13 @@ body::before {
   border-radius: 6px;
   padding: 13px;
   margin-bottom: 8px;
-  cursor: pointer;
+  cursor: grab;
   transition: all 0.15s ease;
+}
+.card.dragging {
+  opacity: 0.45;
+  transform: scale(0.98);
+  cursor: grabbing;
 }
 .card:hover {
   border-color: var(--silver-dim);
@@ -513,6 +530,17 @@ body::before {
 .add-card:hover { border-color: var(--silver-dim); color: var(--silver); }
 
 /* ─── TASKS TABLE ────────────────────────────────────────────────────────── */
+.tasks-section + .tasks-section { margin-top: 22px; }
+
+.tasks-section-title {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--silver-dim);
+  margin: 0 0 8px;
+}
+
 .tasks-wrap { overflow-x: auto; }
 
 table.tasks { width: 100%; border-collapse: collapse; }
@@ -543,6 +571,16 @@ table.tasks tr:hover td { background: var(--surface); }
 .task-name { color: var(--white); }
 .task-done-row .task-name { text-decoration: line-through; color: var(--silver-dim); }
 .task-done-row td { opacity: 0.5; }
+.task-overdue-row td {
+  background: rgba(192,57,43,0.1);
+  border-bottom-color: rgba(192,57,43,0.3);
+}
+.task-overdue-row:hover td { background: rgba(192,57,43,0.15); }
+.task-overdue-row .task-name { color: var(--red-soft); }
+.task-overdue-row .owner-chip {
+  border-color: rgba(192,57,43,0.35);
+  background: rgba(192,57,43,0.08);
+}
 
 .checkbox {
   width: 16px; height: 16px;
@@ -601,6 +639,13 @@ table.tasks tr:hover td { background: var(--surface); }
 
 .date-text { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--silver-dim); white-space: nowrap; }
 .date-overdue { color: var(--red-soft); }
+
+.task-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.task-actions .card-btn { padding: 3px 7px; }
 
 /* ─── DECISIONS LOG ──────────────────────────────────────────────────────── */
 .decisions-log { max-width: 680px; }

@@ -89,22 +89,45 @@
           <button class="sort-dir" id="sortDirBtn" onclick="toggleSortDir()" title="Toggle ascending / descending">↑</button>
         </div>
 
-        <div class="tasks-wrap">
-          <table class="tasks">
-            <thead>
-              <tr>
-                <th style="width:32px"></th>
-                <th>Task</th>
-                <th>Owner</th>
-                <th>Due</th>
-                <th>Added</th>
-                <th>Priority</th>
-                <th style="width:48px"></th>
-              </tr>
-            </thead>
-            <tbody id="tasksBody"></tbody>
-          </table>
-        </div>
+        <section class="tasks-section">
+          <h3 class="tasks-section-title">Open Tasks</h3>
+          <div class="tasks-wrap">
+            <table class="tasks">
+              <thead>
+                <tr>
+                  <th style="width:32px"></th>
+                  <th>Task</th>
+                  <th>Owner</th>
+                  <th>Due</th>
+                  <th>Added</th>
+                  <th>Priority</th>
+                  <th style="width:104px"></th>
+                </tr>
+              </thead>
+              <tbody id="tasksBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="tasks-section" id="completedTasksSection">
+          <h3 class="tasks-section-title">Completed</h3>
+          <div class="tasks-wrap">
+            <table class="tasks">
+              <thead>
+                <tr>
+                  <th style="width:32px"></th>
+                  <th>Task</th>
+                  <th>Owner</th>
+                  <th>Due</th>
+                  <th>Added</th>
+                  <th>Priority</th>
+                  <th style="width:104px"></th>
+                </tr>
+              </thead>
+              <tbody id="completedTasksBody"></tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
       <!-- DECISIONS PAGE -->
@@ -137,6 +160,19 @@
       <button class="btn btn-ghost" onclick="closeLeadDetail()">Close</button>
       <button class="btn btn-danger" id="leadDetailDeleteBtn">Delete Lead</button>
       <button class="btn btn-primary" onclick="saveLeadDetail()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── TASK DETAIL MODAL ────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="taskDetailOverlay">
+  <div class="modal modal-wide" id="taskDetailBox">
+    <div class="modal-title">TASK DETAIL</div>
+    <div id="taskDetailBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeTaskDetail()">Close</button>
+      <button class="btn btn-danger" id="taskDetailDeleteBtn">Delete Task</button>
+      <button class="btn btn-primary" onclick="saveTaskDetail()">Save Changes</button>
     </div>
   </div>
 </div>

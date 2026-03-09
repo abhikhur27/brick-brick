@@ -24,6 +24,29 @@ const contactForm = document.getElementById("contactForm");
 const cfStatus = document.getElementById("cfStatus");
 const cfSubmitBtn = document.getElementById("cfSubmitBtn");
 
+function inferServiceType(message) {
+  const text = String(message || "").toLowerCase();
+  if (text.includes("workflow") || text.includes("automation") || text.includes("ai")) {
+    return "AI Workflow";
+  }
+  if (text.includes("website") || text.includes("site")) {
+    return "Website Build";
+  }
+  return "Other";
+}
+
+function buildLeadNote({ name, email, phone, message }) {
+  return [
+    "Inbound website contact form.",
+    `Name: ${name || "-"}`,
+    `Email: ${email || "-"}`,
+    `Phone: ${phone || "-"}`,
+    "",
+    "Message:",
+    message || "(no message provided)",
+  ].join("\n");
+}
+
 if (contactForm && cfSubmitBtn) {
   contactForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -41,8 +64,8 @@ if (contactForm && cfSubmitBtn) {
       return;
     }
 
-    if (!name || !email || !message) {
-      showStatus("Please include your name, email, and message.", true);
+    if (!name || !email) {
+      showStatus("Please include your name and email.", true);
       return;
     }
 
@@ -58,31 +81,53 @@ if (contactForm && cfSubmitBtn) {
         timestamp: new Date().toISOString(),
       };
 
-      const response = await fetch(MAKE_WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Webhook request failed with status ${response.status}`);
-      }
-
-      // Queue the lead for automatic import into the portal pipeline.
-      await addDoc(collection(db, "contact_submissions"), {
-        name,
-        email,
-        phone,
+      const leadRef = await addDoc(collection(db, "pipeline"), {
+        title: (company || name || "Website Inquiry").trim(),
         company,
-        message,
-        submittedAt: serverTimestamp(),
+        contact: email || name,
+        service: inferServiceType(message),
+        status: "leads",
+        note: buildLeadNote({ name, email, phone, message }),
         source: "website-contact-form",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
+
+      const [submissionResult, webhookResult] = await Promise.allSettled([
+        addDoc(collection(db, "contact_submissions"), {
+          name,
+          email,
+          phone,
+          company,
+          message,
+          submittedAt: serverTimestamp(),
+          source: "website-contact-form",
+          pipelineId: leadRef.id,
+          importedToPipelineAt: serverTimestamp(),
+        }),
+        fetch(MAKE_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((response) => {
+          if (!response.ok) {
+            throw new Error(`Webhook request failed with status ${response.status}`);
+          }
+          return response;
+        }),
+      ]);
+
+      if (submissionResult.status === "rejected") {
+        console.warn("contact_submissions write failed:", submissionResult.reason);
+      }
+      if (webhookResult.status === "rejected") {
+        console.warn("Webhook submission failed:", webhookResult.reason);
+      }
 
       contactForm.reset();
       showStatus("Message received - we'll follow up within one business day.", false);
     } catch (error) {
-      console.warn("Webhook submission failed:", error);
+      console.warn("Lead creation failed:", error);
       showStatus("Submission failed. Please email us directly at contact@brick-brick.org.", true);
     } finally {
       setLoading(false);

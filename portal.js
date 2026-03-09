@@ -3,7 +3,7 @@ import { initializeApp }          from "https://www.gstatic.com/firebasejs/10.12
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc,
-         onSnapshot, serverTimestamp, query, orderBy, runTransaction }
+         onSnapshot, serverTimestamp, query, orderBy }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { firebaseConfig }          from "./firebase-config.js";
 
@@ -37,14 +37,14 @@ let taskSortAsc   = true;
 let unsubPipeline   = null;
 let unsubTasks      = null;
 let unsubDecisions  = null;
-let unsubContactSubmissions = null;
-
-const syncingSubmissionIds = new Set();
 
 // ─── MODAL STATE ─────────────────────────────────────────────────────────────
 let modalMode    = "pipeline";
 let modalContext = "";
 let editingLeadId = null;   // ID of the lead currently open in detail modal
+let editingTaskId = null;   // ID of the task currently open in detail modal
+let draggingPipelineCardId = null;
+let suppressCardClickUntil = 0;
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
 window.doLogin = async function () {
@@ -70,7 +70,6 @@ window.doLogout = async function () {
   if (unsubPipeline)  unsubPipeline();
   if (unsubTasks)     unsubTasks();
   if (unsubDecisions) unsubDecisions();
-  if (unsubContactSubmissions) unsubContactSubmissions();
   await signOut(auth);
 };
 
@@ -112,73 +111,10 @@ function friendlyAuthError(code) {
   return map[code] || "Login failed. Check your credentials.";
 }
 
-function inferServiceType(message) {
-  const text = String(message || "").toLowerCase();
-  if (text.includes("workflow") || text.includes("automation") || text.includes("ai")) {
-    return "AI Workflow";
-  }
-  if (text.includes("website") || text.includes("site")) {
-    return "Website Build";
-  }
-  return "Other";
-}
-
-function buildSubmissionNote(data) {
-  return [
-    "Inbound website contact form.",
-    `Name: ${data.name || "-"}`,
-    `Email: ${data.email || "-"}`,
-    `Phone: ${data.phone || "-"}`,
-    "",
-    "Message:",
-    data.message || "(no message provided)",
-  ].join("\n");
-}
-
-async function syncSubmissionToPipeline(submissionDoc) {
-  if (!submissionDoc?.id) return;
-  if (syncingSubmissionIds.has(submissionDoc.id)) return;
-  syncingSubmissionIds.add(submissionDoc.id);
-
-  try {
-    await runTransaction(db, async (tx) => {
-      const submissionRef = doc(db, "contact_submissions", submissionDoc.id);
-      const freshSnap = await tx.get(submissionRef);
-      if (!freshSnap.exists()) return;
-
-      const data = freshSnap.data();
-      if (data.pipelineId) return;
-
-      const leadRef = doc(collection(db, "pipeline"));
-      tx.set(leadRef, {
-        title: (data.company || data.name || "Website Inquiry").trim(),
-        company: data.company || "",
-        contact: data.email || data.name || "",
-        service: inferServiceType(data.message),
-        status: "leads",
-        note: buildSubmissionNote(data),
-        source: "website-contact-form",
-        sourceSubmissionId: submissionDoc.id,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.update(submissionRef, {
-        pipelineId: leadRef.id,
-        importedToPipelineAt: serverTimestamp(),
-      });
-    });
-  } catch (err) {
-    console.error("syncSubmissionToPipeline:", err);
-  } finally {
-    syncingSubmissionIds.delete(submissionDoc.id);
-  }
-}
-
 // ─── REAL-TIME LISTENERS ──────────────────────────────────────────────────────
 function startListeners() {
   unsubPipeline = onSnapshot(
-    query(collection(db, "pipeline"), orderBy("createdAt", "asc")),
+    query(collection(db, "pipeline"), orderBy("createdAt", "desc")),
     (snap) => {
       currentPipeline = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderPipeline(currentPipeline);
@@ -215,26 +151,12 @@ function startListeners() {
     }
   );
 
-  // Promote contact form submissions into Pipeline leads.
-  unsubContactSubmissions = onSnapshot(
-    query(collection(db, "contact_submissions"), orderBy("submittedAt", "asc")),
-    (snap) => {
-      snap.docs.forEach((submissionDoc) => {
-        const data = submissionDoc.data();
-        if (!data.pipelineId) {
-          void syncSubmissionToPipeline(submissionDoc);
-        }
-      });
-    },
-    (err) => console.error("Contact submissions sync error:", err)
-  );
 }
 
 window.refreshAll = function () {
   if (unsubPipeline)  unsubPipeline();
   if (unsubTasks)     unsubTasks();
   if (unsubDecisions) unsubDecisions();
-  if (unsubContactSubmissions) unsubContactSubmissions();
   startListeners();
 };
 
@@ -257,12 +179,32 @@ function renderPipeline(cards) {
         <span class="col-title">${label}</span>
         <span class="col-count">${colCards.length}</span>
       </div>
-      <div id="col-${key}"></div>
+      <div id="col-${key}" class="kanban-dropzone"></div>
       <button class="add-card" onclick="openAddModal('pipeline','${key}')">+ Add</button>
     `;
     board.appendChild(colEl);
 
     const container = colEl.querySelector(`#col-${key}`);
+    container.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      container.classList.add("is-drop-target");
+    });
+    container.addEventListener("dragleave", () => {
+      container.classList.remove("is-drop-target");
+    });
+    container.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      clearPipelineDropTargets();
+      const cardId =
+        e.dataTransfer?.getData("text/plain")
+        || e.dataTransfer?.getData("application/x-brick-card")
+        || draggingPipelineCardId;
+      if (!cardId) return;
+      const card = currentPipeline.find((c) => c.id === cardId);
+      if (!card || card.status === key) return;
+      await moveCard(cardId, key);
+    });
+
     colCards.forEach((card) => {
       const tagClass =
         card.service === "AI Workflow"   ? "tag-ai"  :
@@ -275,8 +217,28 @@ function renderPipeline(cards) {
 
       const cardEl = document.createElement("div");
       cardEl.className = "card";
+      cardEl.draggable = true;
+      cardEl.addEventListener("dragstart", (e) => {
+        draggingPipelineCardId = card.id;
+        cardEl.classList.add("dragging");
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", card.id);
+          e.dataTransfer.setData("application/x-brick-card", card.id);
+        }
+      });
+      cardEl.addEventListener("dragend", () => {
+        draggingPipelineCardId = null;
+        cardEl.classList.remove("dragging");
+        clearPipelineDropTargets();
+        // Prevent accidental modal open if mouseup after drag triggers click.
+        suppressCardClickUntil = Date.now() + 120;
+      });
       // Clicking the card body (not action buttons) opens detail modal
-      cardEl.addEventListener("click", () => openLeadDetail(card.id));
+      cardEl.addEventListener("click", () => {
+        if (Date.now() < suppressCardClickUntil) return;
+        openLeadDetail(card.id);
+      });
       cardEl.innerHTML = `
         <div class="card-title">${escHtml(card.title)}</div>
         ${card.company ? `<div class="card-company">${escHtml(card.company)}</div>` : ""}
@@ -289,6 +251,12 @@ function renderPipeline(cards) {
       `;
       container.appendChild(cardEl);
     });
+  });
+}
+
+function clearPipelineDropTargets() {
+  document.querySelectorAll(".kanban-dropzone.is-drop-target").forEach((el) => {
+    el.classList.remove("is-drop-target");
   });
 }
 
@@ -435,21 +403,29 @@ function sortedTasks(tasks) {
 
 function renderTasks(tasks) {
   const tbody = document.getElementById("tasksBody");
-  if (!tbody) return;
+  const completedBody = document.getElementById("completedTasksBody");
+  const completedSection = document.getElementById("completedTasksSection");
+  if (!tbody || !completedBody || !completedSection) return;
   tbody.innerHTML = "";
+  completedBody.innerHTML = "";
 
   const sorted = sortedTasks(tasks);
 
   if (!sorted.length) {
-    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state" style="margin:24px 0">No tasks yet.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state" style="margin:24px 0">No open tasks.</div></td></tr>`;
+    completedSection.style.display = "none";
     return;
   }
+
+  let openCount = 0;
+  let completedCount = 0;
 
   sorted.forEach((task) => {
     const tr = document.createElement("tr");
     if (task.done) tr.classList.add("task-done-row");
 
     const isOverdue = !task.done && task.due && task.due < todayStr();
+    if (isOverdue) tr.classList.add("task-overdue-row");
     const pClass    = task.priority === "High" ? "p-high" : task.priority === "Mid" ? "p-mid" : "p-low";
     const initials  = (task.owner || "?").split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
 
@@ -469,10 +445,26 @@ function renderTasks(tasks) {
       <td><span class="date-text ${isOverdue ? "date-overdue" : ""}">${formatDate(task.due)}</span></td>
       <td><span class="date-text">${addedStr}</span></td>
       <td><span class="priority ${pClass}">${task.priority || "—"}</span></td>
-      <td><button class="card-btn delete" onclick="deleteTask('${task.id}')">✕</button></td>
+      <td>
+        <div class="task-actions">
+          <button class="card-btn" onclick="openTaskDetail('${task.id}')">Edit</button>
+          <button class="card-btn delete" onclick="deleteTask('${task.id}')">✕</button>
+        </div>
+      </td>
     `;
-    tbody.appendChild(tr);
+    if (task.done) {
+      completedCount++;
+      completedBody.appendChild(tr);
+    } else {
+      openCount++;
+      tbody.appendChild(tr);
+    }
   });
+
+  if (!openCount) {
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state" style="margin:24px 0">No open tasks.</div></td></tr>`;
+  }
+  completedSection.style.display = completedCount ? "block" : "none";
 }
 
 window.setSort = function (field, btnEl) {
@@ -508,6 +500,92 @@ window.deleteTask = async function (id) {
 };
 
 // ─── DECISIONS ────────────────────────────────────────────────────────────────
+window.openTaskDetail = function (id) {
+  const task = currentTasks.find((t) => t.id === id);
+  if (!task) return;
+  editingTaskId = id;
+
+  const addedStr = task.createdAt?.toDate
+    ? task.createdAt.toDate().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+    : "—";
+
+  document.getElementById("taskDetailBody").innerHTML = `
+    <div class="detail-grid">
+      <div class="form-group form-group-full">
+        <label class="form-label">Task</label>
+        <input class="form-input" id="td_name" value="${escHtmlAttr(task.name || "")}" placeholder="What needs to get done?">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Owner</label>
+        <input class="form-input" id="td_owner" value="${escHtmlAttr(task.owner || "")}" placeholder="Athan / Team / etc.">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Due Date</label>
+        <input class="form-input" type="date" id="td_due" value="${escHtmlAttr(task.due || "")}" style="color-scheme:dark">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Priority</label>
+        <select class="form-select" id="td_priority">
+          <option value="High" ${task.priority === "High" ? "selected" : ""}>High</option>
+          <option value="Mid"  ${task.priority === "Mid"  ? "selected" : ""}>Mid</option>
+          <option value="Low"  ${task.priority === "Low"  ? "selected" : ""}>Low</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-select" id="td_done">
+          <option value="false" ${task.done ? "" : "selected"}>Open</option>
+          <option value="true"  ${task.done ? "selected" : ""}>Completed</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date Added</label>
+        <div class="detail-meta-value">${addedStr}</div>
+      </div>
+    </div>
+  `;
+
+  const delBtn = document.getElementById("taskDetailDeleteBtn");
+  delBtn.onclick = async () => {
+    if (!confirm("Permanently delete this task?")) return;
+    await deleteTask(editingTaskId);
+    closeTaskDetail();
+  };
+
+  document.getElementById("taskDetailOverlay").classList.add("open");
+};
+
+window.saveTaskDetail = async function () {
+  if (!editingTaskId) return;
+  const name = document.getElementById("td_name").value.trim();
+  if (!name) { alert("Task name is required."); return; }
+
+  try {
+    await updateDoc(doc(db, "tasks", editingTaskId), {
+      name,
+      owner:     document.getElementById("td_owner").value.trim() || "Team",
+      due:       document.getElementById("td_due").value || "",
+      priority:  document.getElementById("td_priority").value,
+      done:      document.getElementById("td_done").value === "true",
+      updatedAt: serverTimestamp(),
+    });
+    closeTaskDetail();
+  } catch (err) {
+    console.error("saveTaskDetail:", err);
+    alert("Save failed: " + err.message);
+  }
+};
+
+window.closeTaskDetail = function () {
+  document.getElementById("taskDetailOverlay").classList.remove("open");
+  editingTaskId = null;
+};
+
+document.getElementById("taskDetailOverlay")?.addEventListener("click", function (e) {
+  if (e.target === this) window.closeTaskDetail();
+});
+
+// DECISIONS
 // Schema (each document):
 //   meetingTitle : string    — the meeting name / label
 //   meetingDate  : string    — ISO date "YYYY-MM-DD" for chronological sorting
@@ -614,7 +692,7 @@ document.getElementById("modalOverlay")?.addEventListener("click", function (e) 
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { window.closeModal(); window.closeLeadDetail(); }
+  if (e.key === "Escape") { window.closeModal(); window.closeLeadDetail(); window.closeTaskDetail(); }
 });
 
 function getModalForm(mode) {

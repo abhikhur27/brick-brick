@@ -2,11 +2,47 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ─── TEAM WORKSPACE ──────────────────────────────────────────────────────
-    // All three workspace collections require Firebase Authentication.
-    // No unauthenticated access.
+    // Allow public website form to create only constrained lead records.
+    function isAllowedService(svc) {
+      return svc == "AI Workflow"
+        || svc == "Website Build"
+        || svc == "Other";
+    }
+
+    function isPublicPipelineLeadCreate() {
+      return request.auth == null
+        && request.resource.data.keys().hasOnly([
+          "title",
+          "company",
+          "contact",
+          "service",
+          "status",
+          "note",
+          "source",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.company is string
+        && request.resource.data.company.size() <= 120
+        && request.resource.data.contact is string
+        && request.resource.data.contact.size() <= 200
+        && isAllowedService(request.resource.data["service"])
+        && request.resource.data.status == "leads"
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 4000
+        && request.resource.data.source == "website-contact-form"
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    // TEAM WORKSPACE
+    // Tasks and decisions remain auth-only.
     match /pipeline/{docId} {
-      allow read, write: if request.auth != null;
+      allow read, update, delete: if request.auth != null;
+      allow create: if request.auth != null || isPublicPipelineLeadCreate();
     }
 
     match /tasks/{docId} {
@@ -17,17 +53,12 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
-    // ─── CONTACT FORM SUBMISSIONS ────────────────────────────────────────────
-    // Public visitors can CREATE a submission (the contact form).
-    // Only authenticated team members can read or delete records.
-    // No Cloud Functions, no Secret Manager, no Blaze plan required.
+    // CONTACT FORM SUBMISSIONS
+    // Public visitors can create a submission.
+    // Team members can read/update/delete while authenticated.
     match /contact_submissions/{docId} {
       allow create: if true;
       allow read, update, delete: if request.auth != null;
     }
-
-    // NOTE: The `mail` collection rule has been removed.
-    // The Firebase "Trigger Email" extension required Blaze plan / Secret Manager.
-    // Email is now handled by Web3Forms (static-site-friendly, no backend needed).
   }
 }
