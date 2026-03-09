@@ -1,7 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480" fill="none">
-  <rect width="480" height="480" rx="72" fill="#0F1C29"/>
-  <rect x="24" y="24" width="432" height="432" rx="52" stroke="#314253" stroke-width="4"/>
-  <circle cx="240" cy="178" r="72" fill="#1A2C3E"/>
-  <path d="M130 360c18-58 67-94 110-94s92 36 110 94" fill="#1A2C3E"/>
-  <text x="240" y="432" text-anchor="middle" fill="#9DB1C4" font-family="Arial, sans-serif" font-size="26">REPLACE WITH PHOTO</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" fill="none">
+<rect width="400" height="400" rx="48" fill="#0B1520"/>
+<rect x="24" y="24" width="352" height="352" rx="36" fill="url(#g)" fill-opacity="0.16" stroke="#284154"/>
+<text x="200" y="215" text-anchor="middle" fill="#EAF0FF" font-family="Arial, sans-serif" font-size="120" font-weight="700">A</text>
+<defs><linearGradient id="g" x1="52" y1="42" x2="334" y2="351" gradientUnits="userSpaceOnUse"><stop stop-color="#7DD3FC"/><stop offset="1" stop-color="#9EF4D7"/></linearGradient></defs>
 </svg>

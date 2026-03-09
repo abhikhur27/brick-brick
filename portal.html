@@ -3,67 +3,141 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="robots" content="noindex,nofollow" />
-  <title>Brick Brick Team Portal</title>
+  <title>Brick Brick | Team Portal</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="portal.css" />
 </head>
 <body>
-  <main class="portal-shell">
-    <section class="auth-panel card" id="authPanel">
-      <div class="portal-brand">
-        <span class="brand-mark">BB</span>
+  <div id="loginScreen">
+    <div class="login-box">
+      <div class="login-brand">BRICK BRICK</div>
+      <div class="login-sub">Team Workspace</div>
+      <div class="login-label">Email</div>
+      <input class="login-input" type="email" id="emailInput" placeholder="team@brick-brick.org" autocomplete="email">
+      <div class="login-label">Password</div>
+      <input class="login-input" type="password" id="passwordInput" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+      <button class="login-btn" onclick="doLogin()">ENTER</button>
+      <div class="login-error" id="loginError"></div>
+      <a class="back-link" href="index.html">← Back to site</a>
+    </div>
+  </div>
+
+  <div id="app">
+    <aside class="sidebar">
+      <div class="brand-panel">
+        <div class="brand-name">BRICK BRICK</div>
+        <div class="brand-sub">Team Workspace</div>
+      </div>
+      <nav class="nav">
+        <div class="nav-label">Workspace</div>
+        <div class="nav-item active" data-page="dashboard"><span class="nav-icon">◆</span>Dashboard</div>
+        <div class="nav-item" data-page="pipeline"><span class="nav-icon">◈</span>Pipeline</div>
+        <div class="nav-item" data-page="tasks"><span class="nav-icon">▣</span>Tasks</div>
+        <div class="nav-item" data-page="decisions"><span class="nav-icon">◎</span>Decisions</div>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="signed-in-as" id="signedInAs"></div>
+        <button class="logout-btn" onclick="doLogout()">Log Out</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
         <div>
-          <strong>Brick Brick Portal</strong>
-          <small>Employee profiles and internal directory</small>
+          <div class="page-title" id="pageTitle">DASHBOARD</div>
+          <div class="page-subtitle" id="pageSubtitle">Shared operating workspace for Brick Brick.</div>
+        </div>
+        <div class="topbar-right">
+          <button class="btn btn-ghost" id="refreshBtn">Refresh</button>
+          <button class="btn btn-primary" id="addBtn">+ Add</button>
         </div>
       </div>
 
-      <h1>Sign in to continue</h1>
-      <p class="muted">This page is intended for team access. The UI is hosted statically, while access and data can be protected through Firebase Authentication and Firestore rules.</p>
+      <div class="content">
+        <section class="page active" id="page-dashboard">
+          <div class="stats-grid">
+            <article class="stat-card">
+              <div class="stat-label">Open leads</div>
+              <div class="stat-value" id="statOpenLeads">0</div>
+              <div class="stat-note">Leads + conversations + proposals</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-label">Closed deals</div>
+              <div class="stat-value" id="statClosedDeals">0</div>
+              <div class="stat-note">Opportunities marked closed</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-label">Open tasks</div>
+              <div class="stat-value" id="statOpenTasks">0</div>
+              <div class="stat-note">Incomplete team work items</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-label">Decision entries</div>
+              <div class="stat-value" id="statDecisions">0</div>
+              <div class="stat-note">Logged meeting notes and decisions</div>
+            </article>
+          </div>
 
-      <form id="loginForm" class="auth-form">
-        <label>
-          Email
-          <input type="email" id="loginEmail" placeholder="name@company.com" required>
-        </label>
-        <label>
-          Password
-          <input type="password" id="loginPassword" placeholder="••••••••" required>
-        </label>
-        <button type="submit" class="button primary full">Sign in</button>
-      </form>
+          <div class="dashboard-grid">
+            <article class="panel-card">
+              <div class="panel-head">
+                <h3>Recent pipeline</h3>
+                <button class="mini-link" data-jump="pipeline">View all</button>
+              </div>
+              <div id="dashboardPipeline" class="mini-list"></div>
+            </article>
+            <article class="panel-card">
+              <div class="panel-head">
+                <h3>Priority tasks</h3>
+                <button class="mini-link" data-jump="tasks">View all</button>
+              </div>
+              <div id="dashboardTasks" class="mini-list"></div>
+            </article>
+          </div>
+        </section>
 
-      <p class="status" id="authStatus">Waiting for sign-in.</p>
-      <a href="index.html" class="back-link">← Back to main website</a>
-    </section>
+        <section class="page" id="page-pipeline">
+          <div class="kanban" id="kanbanBoard"></div>
+        </section>
 
-    <section class="portal-content hidden" id="portalContent">
-      <header class="portal-header">
-        <div>
-          <p class="eyebrow">Internal directory</p>
-          <h2>Employee Profiles</h2>
-        </div>
-        <div class="portal-actions">
-          <span class="signed-in-as" id="signedInAs"></span>
-          <button class="button ghost" id="logoutBtn">Log out</button>
-        </div>
-      </header>
+        <section class="page" id="page-tasks">
+          <div class="tasks-wrap">
+            <table class="tasks">
+              <thead>
+                <tr>
+                  <th style="width:32px"></th>
+                  <th>Task</th>
+                  <th>Owner</th>
+                  <th>Due Date</th>
+                  <th>Priority</th>
+                  <th style="width:60px"></th>
+                </tr>
+              </thead>
+              <tbody id="tasksBody"></tbody>
+            </table>
+          </div>
+        </section>
 
-      <div class="profiles-grid" id="profilesGrid">
-        <article class="profile-card card">
-          <img src="assets/placeholder-abhi.svg" alt="Profile placeholder" />
-          <h3>Sample Employee</h3>
-          <p class="role">Role placeholder</p>
-          <p>Once connected to Firestore, this area can render employee bios, contact info, specialties, and internal notes.</p>
-        </article>
+        <section class="page" id="page-decisions">
+          <div class="decisions-log" id="decisionsLog"></div>
+        </section>
       </div>
-    </section>
-  </main>
+    </main>
+  </div>
 
-  <script type="module" src="firebase-config.js"></script>
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modalBox">
+      <div class="modal-title" id="modalTitle">Add</div>
+      <div id="modalBody"></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" id="modalSave">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="portal.js"></script>
 </body>
 </html>
