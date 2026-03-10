@@ -163,7 +163,10 @@
         </div>
 
         <section class="clients-requests">
-          <h3 class="tasks-section-title">Client Requests</h3>
+          <div class="clients-requests-header">
+            <h3 class="tasks-section-title">Client Requests</h3>
+            <button class="sort-pill" id="toggleArchivedRequestsBtn" type="button" onclick="toggleArchivedRequests()">Show Archived</button>
+          </div>
           <div class="tasks-wrap">
             <table class="tasks">
               <thead>
@@ -172,6 +175,7 @@
                   <th>Request</th>
                   <th>Category</th>
                   <th>Priority</th>
+                  <th>Owner</th>
                   <th>Status</th>
                   <th>Updated</th>
                   <th style="width:112px"></th>
@@ -303,6 +307,8 @@
     <div id="requestDetailBody"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeRequestDetail()">Close</button>
+      <button class="btn btn-ghost" id="requestArchiveBtn" onclick="toggleArchiveRequest()">Archive Request</button>
+      <button class="btn btn-danger" id="requestDeleteBtn" onclick="deleteRequest()">Delete Request</button>
       <button class="btn btn-ghost" id="requestPushBtn" onclick="pushRequestToPipeline()">Push to Forge Lane</button>
       <button class="btn btn-primary" onclick="saveRequestDetail()">Save Changes</button>
     </div>

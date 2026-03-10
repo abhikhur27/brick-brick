@@ -485,7 +485,15 @@ body::before {
 }
 .tag-ai    { background: rgba(41,128,185,0.2);   color: var(--blue-soft);  border: 1px solid rgba(41,128,185,0.3); }
 .tag-web   { background: rgba(39,174,96,0.2);    color: var(--green-soft); border: 1px solid rgba(39,174,96,0.3); }
+.tag-automation { background: rgba(142,68,173,0.2); color: #d7bde2; border: 1px solid rgba(142,68,173,0.35); }
+.tag-content { background: rgba(22,160,133,0.2); color: #a3e4d7; border: 1px solid rgba(22,160,133,0.35); }
+.tag-growth { background: rgba(230,126,34,0.2); color: #f8c471; border: 1px solid rgba(230,126,34,0.35); }
+.tag-brand { background: rgba(52,152,219,0.2); color: #aed6f1; border: 1px solid rgba(52,152,219,0.35); }
 .tag-other { background: rgba(136,136,136,0.15); color: var(--silver-dim); border: 1px solid var(--border); }
+
+.pipeline-owner {
+  margin-top: 8px;
+}
 
 .card-actions {
   display: flex;
@@ -830,6 +838,14 @@ table.tasks tr:hover td { background: var(--surface); }
   padding: 12px;
 }
 
+.clients-requests-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .client-flow-board {
   gap: 10px;
 }
@@ -945,6 +961,16 @@ table.tasks tr:hover td { background: var(--surface); }
   color: var(--green-soft);
   border-color: rgba(88,214,141,0.35);
   background: rgba(88,214,141,0.11);
+}
+
+.rs-archived {
+  color: var(--silver-dim);
+  border-color: var(--border);
+  background: rgba(255,255,255,0.05);
+}
+
+tr.request-row-archived td {
+  opacity: 0.58;
 }
 
 .request-helper {

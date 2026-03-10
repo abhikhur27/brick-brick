@@ -3,7 +3,7 @@ import { initializeApp }          from "https://www.gstatic.com/firebasejs/10.12
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc,
-         onSnapshot, serverTimestamp, query, orderBy, arrayUnion }
+         onSnapshot, serverTimestamp, query, orderBy, arrayUnion, where }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { firebaseConfig }          from "./firebase-config.js";
 
@@ -31,6 +31,15 @@ const CLIENT_FLOW_COLS = [
   { key: "delivered", label: "Delivered" },
 ];
 
+const LEAD_SERVICE_OPTIONS = [
+  { value: "AI Workflow", tagClass: "tag-ai" },
+  { value: "Website Build", tagClass: "tag-web" },
+  { value: "Automation Ops", tagClass: "tag-automation" },
+  { value: "SEO / Content", tagClass: "tag-content" },
+  { value: "Paid Ads", tagClass: "tag-growth" },
+  { value: "Brand / Creative", tagClass: "tag-brand" },
+];
+
 // ─── STATE CACHES (updated by real-time listeners) ───────────────────────────
 let currentPipeline  = [];
 let currentTasks     = [];
@@ -38,9 +47,11 @@ let currentDecisions = [];
 let currentClients   = [];
 let currentClientRequests = [];
 let currentClientFlow = [];
+let currentTeamUsers = [];
 let currentManagedUsers = [];
 let currentProvisioning = [];
 let managedRecordsByKey = new Map();
+let showArchivedRequests = false;
 
 // ─── TASK SORT STATE ─────────────────────────────────────────────────────────
 let taskSortField = "due";     // "due" | "createdAt" | "priority" | "owner" | "done"
@@ -53,6 +64,7 @@ let unsubDecisions  = null;
 let unsubClients    = null;
 let unsubClientRequests = null;
 let unsubClientFlow = null;
+let unsubTeamUsers = null;
 let unsubUsers = null;
 let unsubProvisioning = null;
 
@@ -190,6 +202,8 @@ onAuthStateChanged(auth, async (user) => {
     currentUserRole = null;
     currentClientFlow = [];
     currentClientRequests = [];
+    currentTeamUsers = [];
+    showArchivedRequests = false;
     currentManagedUsers = [];
     currentProvisioning = [];
     managedRecordsByKey = new Map();
@@ -243,6 +257,8 @@ function friendlyAuthError(code) {
 // ─── REAL-TIME LISTENERS ──────────────────────────────────────────────────────
 function startListeners() {
   stopRealtimeListeners();
+  startTeamUserListener();
+  updateArchivedToggleButton();
 
   unsubPipeline = onSnapshot(
     query(collection(db, "pipeline"), orderBy("createdAt", "desc")),
@@ -331,6 +347,33 @@ function stopManagedUserListeners() {
   unsubProvisioning = null;
 }
 
+function startTeamUserListener() {
+  stopTeamUserListener();
+  unsubTeamUsers = onSnapshot(
+    query(collection(db, "users"), where("role", "in", ["admin", "super_admin"])),
+    (snap) => {
+      currentTeamUsers = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((user) => user.disabled !== true)
+        .sort((a, b) => {
+          const an = String(a.name || a.email || "").toLowerCase();
+          const bn = String(b.name || b.email || "").toLowerCase();
+          return an.localeCompare(bn);
+        });
+    },
+    (err) => {
+      console.error("Team users listener error:", err);
+      currentTeamUsers = [];
+    }
+  );
+}
+
+function stopTeamUserListener() {
+  if (unsubTeamUsers) unsubTeamUsers();
+  unsubTeamUsers = null;
+  currentTeamUsers = [];
+}
+
 function stopRealtimeListeners() {
   if (unsubPipeline) unsubPipeline();
   if (unsubTasks) unsubTasks();
@@ -338,6 +381,7 @@ function stopRealtimeListeners() {
   if (unsubClients) unsubClients();
   if (unsubClientRequests) unsubClientRequests();
   if (unsubClientFlow) unsubClientFlow();
+  stopTeamUserListener();
   stopManagedUserListeners();
   unsubPipeline = null;
   unsubTasks = null;
@@ -383,6 +427,114 @@ window.openSalesPlaybook = function () {
   window.location.href = "sales_playbook.html";
 };
 
+function leadServiceTagClass(service) {
+  const normalized = String(service || "").trim();
+  const match = LEAD_SERVICE_OPTIONS.find((item) => item.value === normalized);
+  return match ? match.tagClass : "tag-other";
+}
+
+function isPresetLeadService(service) {
+  const normalized = String(service || "").trim();
+  return LEAD_SERVICE_OPTIONS.some((item) => item.value === normalized);
+}
+
+function leadServiceSelectValue(service) {
+  return isPresetLeadService(service) ? String(service).trim() : "__other__";
+}
+
+function leadServiceOptionsHtml(selectedService) {
+  const selectedValue = leadServiceSelectValue(selectedService);
+  const options = LEAD_SERVICE_OPTIONS
+    .map((item) => `<option value="${escHtmlAttr(item.value)}" ${item.value === selectedValue ? "selected" : ""}>${escHtml(item.value)}</option>`)
+    .join("");
+  return `
+    ${options}
+    <option value="__other__" ${selectedValue === "__other__" ? "selected" : ""}>Other (custom)</option>
+  `;
+}
+
+function syncServiceOtherField(selectId, wrapId, inputId) {
+  const selectEl = document.getElementById(selectId);
+  const wrapEl = document.getElementById(wrapId);
+  const inputEl = document.getElementById(inputId);
+  if (!selectEl || !wrapEl || !inputEl) return;
+  const show = selectEl.value === "__other__";
+  wrapEl.style.display = show ? "block" : "none";
+  inputEl.required = show;
+  if (!show) inputEl.value = "";
+}
+
+function resolveLeadServiceValue(selectId, inputId) {
+  const selectedValue = String(document.getElementById(selectId)?.value || "");
+  if (selectedValue !== "__other__") return selectedValue;
+  return String(document.getElementById(inputId)?.value || "").trim();
+}
+
+function teamUserLabel(user) {
+  return String(user?.name || user?.email || user?.id || "Team");
+}
+
+function teamUserInitials(name) {
+  return String(name || "T")
+    .split(" ")
+    .map((part) => part[0] || "")
+    .join("")
+    .toUpperCase()
+    .slice(0, 2) || "T";
+}
+
+function resolveTeamUserName(uid, fallbackName = "") {
+  const normalizedUid = String(uid || "");
+  if (!normalizedUid) return "";
+  const found = currentTeamUsers.find((user) => user.id === normalizedUid);
+  if (found) return teamUserLabel(found);
+  return String(fallbackName || normalizedUid.slice(0, 8));
+}
+
+function teamAssigneeOptionsHtml(selectedUid = "", fallbackName = "") {
+  const normalizedSelected = String(selectedUid || "");
+  const options = [`<option value="">Unassigned</option>`];
+  const seen = new Set();
+  const users = currentTeamUsers.length
+    ? currentTeamUsers
+    : (auth.currentUser?.uid
+      ? [{
+        id: String(auth.currentUser.uid),
+        name: String(auth.currentUser.displayName || auth.currentUser.email || "Me"),
+        email: auth.currentUser.email || "",
+      }]
+      : []);
+
+  users.forEach((user) => {
+    const uid = String(user.id || "");
+    if (!uid) return;
+    seen.add(uid);
+    options.push(
+      `<option value="${escHtmlAttr(uid)}" ${uid === normalizedSelected ? "selected" : ""}>${escHtml(teamUserLabel(user))}</option>`
+    );
+  });
+
+  if (normalizedSelected && !seen.has(normalizedSelected)) {
+    const fallback = resolveTeamUserName(normalizedSelected, fallbackName);
+    options.push(`<option value="${escHtmlAttr(normalizedSelected)}" selected>${escHtml(fallback)}</option>`);
+  }
+
+  return options.join("");
+}
+
+function assigneeChipHtml(uid, fallbackName = "", emptyLabel = "Unassigned") {
+  const label = resolveTeamUserName(uid, fallbackName);
+  if (!label) {
+    return `<span class="date-text">${escHtml(emptyLabel)}</span>`;
+  }
+  return `
+    <span class="owner-chip">
+      <span class="avatar">${escHtml(teamUserInitials(label))}</span>
+      ${escHtml(label)}
+    </span>
+  `;
+}
+
 // ─── PIPELINE RENDER ──────────────────────────────────────────────────────────
 function renderPipeline(cards) {
   const board = document.getElementById("kanbanBoard");
@@ -425,9 +577,10 @@ function renderPipeline(cards) {
     });
 
     colCards.forEach((card) => {
-      const tagClass =
-        card.service === "AI Workflow"   ? "tag-ai"  :
-        card.service === "Website Build" ? "tag-web" : "tag-other";
+      const tagClass = leadServiceTagClass(card.service);
+      const ownerChip = (card.ownerUid || card.ownerName)
+        ? `<div class="pipeline-owner">${assigneeChipHtml(card.ownerUid, card.ownerName)}</div>`
+        : "";
 
       const moveButtons = COLS
         .filter((c) => c.key !== key)
@@ -463,6 +616,7 @@ function renderPipeline(cards) {
         ${card.company ? `<div class="card-company">${escHtml(card.company)}</div>` : ""}
         <div class="card-meta">${escHtml(card.note || "")}</div>
         <span class="card-tag ${tagClass}">${escHtml(card.service || "")}</span>
+        ${ownerChip}
         <div class="card-actions">
           ${moveButtons}
           <button class="card-btn delete" onclick="event.stopPropagation();deleteCard('${card.id}')">✕</button>
@@ -504,6 +658,9 @@ window.openLeadDetail = function (id) {
   const addedStr = card.createdAt?.toDate
     ? card.createdAt.toDate().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
     : "—";
+  const selectedServiceValue = leadServiceSelectValue(card.service);
+  const customServiceValue = selectedServiceValue === "__other__" ? String(card.service || "") : "";
+  const ownerOptions = teamAssigneeOptionsHtml(card.ownerUid || "", card.ownerName || "");
 
   document.getElementById("leadDetailBody").innerHTML = `
     <div class="detail-grid">
@@ -522,14 +679,22 @@ window.openLeadDetail = function (id) {
       <div class="form-group">
         <label class="form-label">Service Type</label>
         <select class="form-select" id="ld_service">
-          <option value="AI Workflow"   ${card.service === "AI Workflow"   ? "selected" : ""}>AI Workflow</option>
-          <option value="Website Build" ${card.service === "Website Build" ? "selected" : ""}>Website Build</option>
-          <option value="Other"         ${card.service === "Other"         ? "selected" : ""}>Other</option>
+          ${leadServiceOptionsHtml(card.service)}
         </select>
+      </div>
+      <div class="form-group" id="ld_serviceOtherWrap" style="${selectedServiceValue === "__other__" ? "" : "display:none"}">
+        <label class="form-label">Custom Service</label>
+        <input class="form-input" id="ld_serviceOther" value="${escHtmlAttr(customServiceValue)}" placeholder="Type service name">
       </div>
       <div class="form-group">
         <label class="form-label">Status</label>
         <select class="form-select" id="ld_status">${colOpts}</select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Working Owner</label>
+        <select class="form-select" id="ld_ownerUid">
+          ${ownerOptions}
+        </select>
       </div>
       <div class="form-group form-group-full">
         <label class="form-label">Notes</label>
@@ -541,6 +706,11 @@ window.openLeadDetail = function (id) {
       </div>
     </div>
   `;
+
+  document.getElementById("ld_service")?.addEventListener("change", () => {
+    syncServiceOtherField("ld_service", "ld_serviceOtherWrap", "ld_serviceOther");
+  });
+  syncServiceOtherField("ld_service", "ld_serviceOtherWrap", "ld_serviceOther");
 
   // Wire up delete button inside the detail modal
   const delBtn = document.getElementById("leadDetailDeleteBtn");
@@ -555,12 +725,21 @@ window.openLeadDetail = function (id) {
 
 window.saveLeadDetail = async function () {
   if (!editingLeadId) return;
+  const service = resolveLeadServiceValue("ld_service", "ld_serviceOther");
+  if (!service) {
+    alert("Please select a service or provide a custom service label.");
+    return;
+  }
+  const ownerUid = String(document.getElementById("ld_ownerUid").value || "");
+  const ownerName = ownerUid ? resolveTeamUserName(ownerUid, "") : "";
   try {
     await updateDoc(doc(db, "pipeline", editingLeadId), {
       title:     document.getElementById("ld_title").value.trim(),
       company:   document.getElementById("ld_company").value.trim(),
       contact:   document.getElementById("ld_contact").value.trim(),
-      service:   document.getElementById("ld_service").value,
+      service,
+      ownerUid,
+      ownerName,
       status:    document.getElementById("ld_status").value,
       note:      document.getElementById("ld_note").value.trim(),
       updatedAt: serverTimestamp(),
@@ -1736,28 +1915,60 @@ function makeRequestTimelineEntry({ kind = "note", status = "", text = "", visib
   };
 }
 
+function hasActiveForgeLaneCard(req) {
+  const flowId = String(req?.clientPipelineId || req?.pipelineId || "");
+  if (!flowId) return false;
+  return currentClientFlow.some((card) => card.id === flowId);
+}
+
+function updateArchivedToggleButton() {
+  const btn = document.getElementById("toggleArchivedRequestsBtn");
+  if (!btn) return;
+  btn.textContent = showArchivedRequests ? "Hide Archived" : "Show Archived";
+  btn.classList.toggle("active", showArchivedRequests);
+}
+
+window.toggleArchivedRequests = function () {
+  showArchivedRequests = !showArchivedRequests;
+  updateArchivedToggleButton();
+  renderClientRequestsAdmin(currentClientRequests);
+};
+
 function renderClientRequestsAdmin(requests) {
   const body = document.getElementById("clientRequestsBody");
   if (!body) return;
   body.innerHTML = "";
-  if (!requests.length) {
-    body.innerHTML = `<tr><td colspan="7"><div class="empty-state" style="margin:24px 0">No client requests yet.</div></td></tr>`;
+  const visibleRequests = showArchivedRequests
+    ? requests
+    : requests.filter((req) => req.archived !== true);
+
+  if (!visibleRequests.length) {
+    const message = showArchivedRequests
+      ? "No client requests yet."
+      : "No active client requests. Use \"Show Archived\" to view history.";
+    body.innerHTML = `<tr><td colspan="8"><div class="empty-state" style="margin:24px 0">${message}</div></td></tr>`;
     return;
   }
 
-  requests.forEach((req) => {
+  visibleRequests.forEach((req) => {
     const tr = document.createElement("tr");
+    if (req.archived === true) tr.classList.add("request-row-archived");
     const updatedDate = req.updatedAt?.toDate
       ? req.updatedAt.toDate().toLocaleDateString("en-US", { month: "short", day: "numeric" })
       : (req.createdAt?.toDate
         ? req.createdAt.toDate().toLocaleDateString("en-US", { month: "short", day: "numeric" })
         : "—");
+    const ownerCell = assigneeChipHtml(req.ownerUid, req.ownerName);
+    const statusPill = req.archived === true
+      ? `<span class="req-status rs-archived">Archived</span>`
+      : `<span class="req-status ${requestStatusClass(req.status)}">${requestStatusLabel(req.status)}</span>`;
     tr.innerHTML = `
       <td>${escHtml(req.clientName || "Unknown")}</td>
       <td>${escHtml(req.title || "Untitled request")}</td>
       <td>${escHtml(req.category || "general")}</td>
       <td>${escHtml(req.priority || "normal")}</td>
-      <td><span class="req-status ${requestStatusClass(req.status)}">${requestStatusLabel(req.status)}</span></td>
+      <td>${ownerCell}</td>
+      <td>${statusPill}</td>
       <td><span class="date-text">${updatedDate}</span></td>
       <td><button class="card-btn" onclick="openRequestDetail('${req.id}')">Manage</button></td>
     `;
@@ -1849,8 +2060,30 @@ window.moveClientFlowCard = async function (id, nextStatus) {
 
 window.deleteClientFlowCard = async function (id) {
   if (!confirm("Remove this request from Forge Lane?")) return;
+  const card = currentClientFlow.find((item) => item.id === id);
   try {
     await deleteDoc(doc(db, "client_flow", id));
+
+    const requestId = String(card?.requestId || "");
+    if (requestId) {
+      const updates = {
+        clientPipelineId: "",
+        pipelineId: "",
+        updatedAt: serverTimestamp(),
+        timeline: arrayUnion(
+          makeRequestTimelineEntry({
+            kind: "flow",
+            text: "Removed from Forge Lane board.",
+            visibility: "internal",
+          })
+        ),
+      };
+      try {
+        await updateDoc(doc(db, "client_requests", requestId), updates);
+      } catch (syncErr) {
+        console.error("deleteClientFlowCard request sync:", syncErr);
+      }
+    }
   } catch (err) {
     console.error("deleteClientFlowCard:", err);
     alert("Could not delete request card.");
@@ -1861,8 +2094,15 @@ window.openRequestDetail = function (id) {
   const req = currentClientRequests.find((r) => r.id === id);
   if (!req) return;
   editingRequestId = id;
+  const ownerOptions = teamAssigneeOptionsHtml(req.ownerUid || "", req.ownerName || "");
+  const activeInFlow = hasActiveForgeLaneCard(req);
   document.getElementById("requestDetailBody").innerHTML = `
     <div class="detail-grid">
+      ${req.archived === true ? `
+      <div class="form-group form-group-full">
+        <div class="request-helper">This request is archived. Restore it to make it active again.</div>
+      </div>
+      ` : ""}
       <div class="form-group">
         <label class="form-label">Client</label>
         <div class="detail-meta-value">${escHtml(req.clientName || "Unknown")}</div>
@@ -1896,6 +2136,12 @@ window.openRequestDetail = function (id) {
           <option value="done" ${req.status === "done" ? "selected" : ""}>Done</option>
         </select>
       </div>
+      <div class="form-group">
+        <label class="form-label">Working Owner</label>
+        <select class="form-select" id="rd_ownerUid">
+          ${ownerOptions}
+        </select>
+      </div>
       <div class="form-group form-group-full">
         <label class="form-label">Client Update (Visible in Client Panel)</label>
         <textarea class="form-input form-textarea" id="rd_clientUpdate" rows="3" placeholder="Add a short progress update for this client."></textarea>
@@ -1914,9 +2160,15 @@ window.openRequestDetail = function (id) {
 
   const pushBtn = document.getElementById("requestPushBtn");
   if (pushBtn) {
-    const existingFlowId = req.clientPipelineId || req.pipelineId || "";
-    pushBtn.textContent = existingFlowId ? "Already in Forge Lane" : "Push to Forge Lane";
-    pushBtn.disabled = Boolean(existingFlowId);
+    pushBtn.textContent = req.archived === true
+      ? "Archived request"
+      : (activeInFlow ? "Already in Forge Lane" : "Push to Forge Lane");
+    pushBtn.disabled = Boolean(activeInFlow || req.archived === true);
+  }
+
+  const archiveBtn = document.getElementById("requestArchiveBtn");
+  if (archiveBtn) {
+    archiveBtn.textContent = req.archived === true ? "Restore Request" : "Archive Request";
   }
 
   document.getElementById("requestDetailOverlay").classList.add("open");
@@ -1934,17 +2186,32 @@ window.saveRequestDetail = async function () {
 
   const nextPriority = document.getElementById("rd_priority").value;
   const nextStatus = document.getElementById("rd_status").value;
+  const nextOwnerUid = String(document.getElementById("rd_ownerUid").value || "");
+  const nextOwnerName = nextOwnerUid ? resolveTeamUserName(nextOwnerUid, "") : "";
   const internalNotes = document.getElementById("rd_internalNotes").value.trim();
   const clientUpdate = document.getElementById("rd_clientUpdate").value.trim();
 
   const updates = {
     priority: nextPriority,
     status: nextStatus,
+    ownerUid: nextOwnerUid,
+    ownerName: nextOwnerName,
     internalNotes,
     updatedAt: serverTimestamp(),
   };
 
   const timelineEntries = [];
+  if (nextOwnerUid !== String(req.ownerUid || "")) {
+    timelineEntries.push(
+      makeRequestTimelineEntry({
+        kind: "assignment",
+        status: nextStatus,
+        text: nextOwnerUid ? `Assigned to ${nextOwnerName}.` : "Request unassigned.",
+        visibility: "internal",
+      })
+    );
+  }
+
   if (nextStatus !== String(req.status || "submitted")) {
     timelineEntries.push(
       makeRequestTimelineEntry({
@@ -1980,6 +2247,49 @@ window.saveRequestDetail = async function () {
   }
 };
 
+window.toggleArchiveRequest = async function () {
+  if (!editingRequestId) return;
+  const req = currentClientRequests.find((item) => item.id === editingRequestId);
+  if (!req) return;
+
+  const archiveNext = req.archived !== true;
+  const prompt = archiveNext
+    ? "Archive this request? It will be hidden from active request lists."
+    : "Restore this archived request to active lists?";
+  if (!confirm(prompt)) return;
+
+  try {
+    await updateDoc(doc(db, "client_requests", editingRequestId), {
+      archived: archiveNext,
+      archivedAt: archiveNext ? serverTimestamp() : null,
+      updatedAt: serverTimestamp(),
+      timeline: arrayUnion(
+        makeRequestTimelineEntry({
+          kind: "archive",
+          text: archiveNext ? "Request archived by team." : "Request restored by team.",
+          visibility: "internal",
+        })
+      ),
+    });
+    closeRequestDetail();
+  } catch (err) {
+    console.error("toggleArchiveRequest:", err);
+    alert("Could not update archive state.");
+  }
+};
+
+window.deleteRequest = async function () {
+  if (!editingRequestId) return;
+  if (!confirm("Delete this client request permanently? This cannot be undone.")) return;
+  try {
+    await deleteDoc(doc(db, "client_requests", editingRequestId));
+    closeRequestDetail();
+  } catch (err) {
+    console.error("deleteRequest:", err);
+    alert("Could not delete request.");
+  }
+};
+
 function requestCategoryToService(category) {
   const c = String(category || "").toLowerCase();
   if (c.includes("workflow") || c.includes("automation")) return "AI Workflow";
@@ -1990,8 +2300,8 @@ function requestCategoryToService(category) {
 window.pushRequestToPipeline = async function () {
   if (!editingRequestId) return;
   const req = currentClientRequests.find((r) => r.id === editingRequestId);
-  const existingFlowId = req?.clientPipelineId || req?.pipelineId || "";
-  if (!req || existingFlowId) return;
+  const activeInFlow = hasActiveForgeLaneCard(req);
+  if (!req || activeInFlow || req.archived === true) return;
   try {
     const flowRef = await addDoc(collection(db, "client_flow"), {
       requestId: req.id,
@@ -2195,6 +2505,13 @@ window.openAddModal = function (type, context) {
   document.getElementById("modalBody").innerHTML = getModalForm(modalMode);
   document.getElementById("modalOverlay").classList.add("open");
 
+  if (modalMode === "pipeline") {
+    document.getElementById("f_service")?.addEventListener("change", () => {
+      syncServiceOtherField("f_service", "f_serviceOtherWrap", "f_serviceOther");
+    });
+    syncServiceOtherField("f_service", "f_serviceOtherWrap", "f_serviceOther");
+  }
+
   if (modalMode === "decisions") {
     resetDecisionRows();
   }
@@ -2223,6 +2540,7 @@ function getModalForm(mode) {
     const colOpts = COLS.map((c) =>
       `<option value="${c.key}" ${c.key === (modalContext || "leads") ? "selected" : ""}>${c.label}</option>`
     ).join("");
+    const ownerOptions = teamAssigneeOptionsHtml();
     return `
       <div class="form-group">
         <label class="form-label">Lead / Client Name</label>
@@ -2239,14 +2557,22 @@ function getModalForm(mode) {
       <div class="form-group">
         <label class="form-label">Service Type</label>
         <select class="form-select" id="f_service">
-          <option value="AI Workflow">AI Workflow</option>
-          <option value="Website Build">Website Build</option>
-          <option value="Other">Other</option>
+          ${leadServiceOptionsHtml("AI Workflow")}
         </select>
+      </div>
+      <div class="form-group form-group-full" id="f_serviceOtherWrap" style="display:none">
+        <label class="form-label">Custom Service</label>
+        <input class="form-input" id="f_serviceOther" placeholder="Type service name">
       </div>
       <div class="form-group">
         <label class="form-label">Status</label>
         <select class="form-select" id="f_status">${colOpts}</select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Working Owner</label>
+        <select class="form-select" id="f_ownerUid">
+          ${ownerOptions}
+        </select>
       </div>
       <div class="form-group">
         <label class="form-label">Notes</label>
@@ -2442,11 +2768,20 @@ window.saveModal = async function () {
     if (modalMode === "pipeline") {
       const title = document.getElementById("f_title").value.trim();
       if (!title) { alert("Lead name is required."); return; }
+      const service = resolveLeadServiceValue("f_service", "f_serviceOther");
+      if (!service) {
+        alert("Please select a service or provide a custom service label.");
+        return;
+      }
+      const ownerUid = String(document.getElementById("f_ownerUid").value || "");
+      const ownerName = ownerUid ? resolveTeamUserName(ownerUid, "") : "";
       await addDoc(collection(db, "pipeline"), {
         title,
         company:   document.getElementById("f_company").value.trim(),
         contact:   document.getElementById("f_contact").value.trim(),
-        service:   document.getElementById("f_service").value,
+        service,
+        ownerUid,
+        ownerName,
         status:    document.getElementById("f_status").value,
         note:      document.getElementById("f_note").value.trim(),
         createdAt: serverTimestamp(),
