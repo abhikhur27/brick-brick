@@ -2,7 +2,7 @@
 import { initializeApp }          from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc,
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc,
          onSnapshot, serverTimestamp, query, orderBy }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { firebaseConfig }          from "./firebase-config.js";
@@ -28,6 +28,8 @@ const COLS = [
 let currentPipeline  = [];
 let currentTasks     = [];
 let currentDecisions = [];
+let currentClients   = [];
+let currentClientRequests = [];
 
 // ─── TASK SORT STATE ─────────────────────────────────────────────────────────
 let taskSortField = "due";     // "due" | "createdAt" | "priority" | "owner" | "done"
@@ -37,12 +39,17 @@ let taskSortAsc   = true;
 let unsubPipeline   = null;
 let unsubTasks      = null;
 let unsubDecisions  = null;
+let unsubClients    = null;
+let unsubClientRequests = null;
 
 // ─── MODAL STATE ─────────────────────────────────────────────────────────────
 let modalMode    = "pipeline";
 let modalContext = "";
 let editingLeadId = null;   // ID of the lead currently open in detail modal
 let editingTaskId = null;   // ID of the task currently open in detail modal
+let editingRequestId = null;
+let selectedClientId = null;
+let currentUserRole = null;
 let draggingPipelineCardId = null;
 let suppressCardClickUntil = 0;
 
@@ -70,6 +77,8 @@ window.doLogout = async function () {
   if (unsubPipeline)  unsubPipeline();
   if (unsubTasks)     unsubTasks();
   if (unsubDecisions) unsubDecisions();
+  if (unsubClients) unsubClients();
+  if (unsubClientRequests) unsubClientRequests();
   await signOut(auth);
 };
 
@@ -78,11 +87,30 @@ document.getElementById("loginPassword")?.addEventListener("keydown", (e) => {
 });
 
 // Central auth-state observer — the ONLY place that shows/hides login vs workspace.
-onAuthStateChanged(auth, (user) => {
+async function getUserRole(uid) {
+  try {
+    const snap = await getDoc(doc(db, "users", uid));
+    return snap.exists() ? String(snap.data().role || "") : "";
+  } catch (err) {
+    console.error("getUserRole:", err);
+    return "";
+  }
+}
+
+// Central auth-state observer - the ONLY place that shows/hides login vs workspace.
+onAuthStateChanged(auth, async (user) => {
   // Reveal the page now that auth state is known (prevents flash)
   document.body.style.visibility = "visible";
 
   if (user) {
+    currentUserRole = await getUserRole(user.uid);
+    if (currentUserRole !== "admin") {
+      await signOut(auth);
+      const errEl = document.getElementById("loginError");
+      if (errEl) errEl.textContent = "Internal workspace access is for admin/team accounts only.";
+      return;
+    }
+
     document.getElementById("loginScreen").style.display = "none";
     document.getElementById("app").classList.add("visible");
 
@@ -91,6 +119,7 @@ onAuthStateChanged(auth, (user) => {
 
     startListeners();
   } else {
+    currentUserRole = null;
     document.getElementById("loginScreen").style.display = "flex";
     document.getElementById("app").classList.remove("visible");
 
@@ -151,12 +180,35 @@ function startListeners() {
     }
   );
 
+  unsubClients = onSnapshot(
+    query(collection(db, "clients"), orderBy("companyName", "asc")),
+    (snap) => {
+      currentClients = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (selectedClientId && !currentClients.some((c) => c.id === selectedClientId)) {
+        selectedClientId = null;
+      }
+      renderClientsWorkspace(currentClients);
+    },
+    (err) => console.error("Clients error:", err)
+  );
+
+  unsubClientRequests = onSnapshot(
+    query(collection(db, "client_requests"), orderBy("createdAt", "desc")),
+    (snap) => {
+      currentClientRequests = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderClientRequestsAdmin(currentClientRequests);
+    },
+    (err) => console.error("Client requests error:", err)
+  );
+
 }
 
 window.refreshAll = function () {
   if (unsubPipeline)  unsubPipeline();
   if (unsubTasks)     unsubTasks();
   if (unsubDecisions) unsubDecisions();
+  if (unsubClients) unsubClients();
+  if (unsubClientRequests) unsubClientRequests();
   startListeners();
 };
 
@@ -585,6 +637,411 @@ document.getElementById("taskDetailOverlay")?.addEventListener("click", function
   if (e.target === this) window.closeTaskDetail();
 });
 
+function clientStatusLabel(status) {
+  if (status === "active") return "Active";
+  if (status === "inactive") return "Inactive";
+  if (status === "completed") return "Completed";
+  if (status === "one-time") return "One-Time";
+  return "Active";
+}
+
+function clientStatusClass(status) {
+  if (status === "active") return "sp-active";
+  if (status === "inactive") return "sp-inactive";
+  if (status === "completed") return "sp-completed";
+  if (status === "one-time") return "sp-one-time";
+  return "sp-active";
+}
+
+function isMutedClient(client) {
+  return client.status === "inactive" || client.status === "completed" || client.status === "one-time" || !client.recurring;
+}
+
+function renderClientsWorkspace(clients) {
+  const activeList = document.getElementById("clientsActiveList");
+  const oneTimeList = document.getElementById("clientsOneTimeList");
+  const inactiveList = document.getElementById("clientsInactiveList");
+  if (!activeList || !oneTimeList || !inactiveList) return;
+
+  const inactive = clients.filter((c) => c.status === "inactive" || c.status === "completed");
+  const oneTime = clients.filter((c) =>
+    !(c.status === "inactive" || c.status === "completed")
+    && (c.status === "one-time" || !c.recurring)
+  );
+  const activeRecurring = clients.filter((c) =>
+    !(c.status === "inactive" || c.status === "completed")
+    && !(c.status === "one-time" || !c.recurring)
+  );
+
+  renderClientListGroup(activeList, activeRecurring, "No active recurring clients.");
+  renderClientListGroup(oneTimeList, oneTime, "No one-time clients.");
+  renderClientListGroup(inactiveList, inactive, "No inactive clients.");
+  renderClientDetailPane();
+}
+
+function renderClientListGroup(container, list, emptyText) {
+  container.innerHTML = "";
+  if (!list.length) {
+    container.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">${emptyText}</div>`;
+    return;
+  }
+
+  list.forEach((client) => {
+    const row = document.createElement("div");
+    row.className = `client-row ${selectedClientId === client.id ? "selected" : ""} ${isMutedClient(client) ? "muted" : ""}`;
+    row.innerHTML = `
+      <div class="client-row-head">
+        <div class="client-row-title">${escHtml(client.companyName || "Unnamed Client")}</div>
+        <span class="status-pill ${clientStatusClass(client.status || "active")}">${clientStatusLabel(client.status || "active")}</span>
+      </div>
+      <div class="client-row-sub">
+        ${(client.planName || "No plan set")} · ${client.paid ? "Paid" : "Unpaid"}<br>
+        Updates left: ${Number.isFinite(client.updatesRemaining) ? client.updatesRemaining : "—"}
+      </div>
+    `;
+    row.addEventListener("click", () => {
+      selectedClientId = client.id;
+      renderClientsWorkspace(currentClients);
+    });
+    container.appendChild(row);
+  });
+}
+
+function renderClientDetailPane() {
+  const pane = document.getElementById("clientDetailPane");
+  if (!pane) return;
+  if (!selectedClientId) {
+    pane.classList.add("empty-state");
+    pane.textContent = "Select a client record to edit plan, billing, and notes.";
+    return;
+  }
+
+  const client = currentClients.find((c) => c.id === selectedClientId);
+  if (!client) {
+    pane.classList.add("empty-state");
+    pane.textContent = "Client not found.";
+    return;
+  }
+
+  pane.classList.remove("empty-state");
+  const history = Array.isArray(client.billingHistory) ? client.billingHistory : [];
+  const historyHtml = history.length
+    ? history.map((entry) => `
+        <div class="billing-entry">
+          ${escHtml(entry.date || "—")} · ${escHtml(entry.note || "")}
+        </div>
+      `).join("")
+    : `<div class="billing-entry">No billing history entries yet.</div>`;
+
+  pane.innerHTML = `
+    <div class="client-detail-grid">
+      <div class="form-group">
+        <label class="form-label">Company</label>
+        <input class="form-input" id="cd_companyName" value="${escHtmlAttr(client.companyName || "")}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contact Name</label>
+        <input class="form-input" id="cd_contactName" value="${escHtmlAttr(client.contactName || "")}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contact Email</label>
+        <input class="form-input" id="cd_email" value="${escHtmlAttr(client.email || "")}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Client Auth UID</label>
+        <input class="form-input" id="cd_authUid" value="${escHtmlAttr(client.authUid || "")}" placeholder="Firebase auth UID">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Plan Name</label>
+        <input class="form-input" id="cd_planName" value="${escHtmlAttr(client.planName || "")}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-select" id="cd_status">
+          <option value="active" ${client.status === "active" ? "selected" : ""}>Active</option>
+          <option value="inactive" ${client.status === "inactive" ? "selected" : ""}>Inactive</option>
+          <option value="one-time" ${client.status === "one-time" ? "selected" : ""}>One-Time</option>
+          <option value="completed" ${client.status === "completed" ? "selected" : ""}>Completed</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Recurring</label>
+        <select class="form-select" id="cd_recurring">
+          <option value="true" ${client.recurring ? "selected" : ""}>Recurring</option>
+          <option value="false" ${client.recurring ? "" : "selected"}>One-Time</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Paid</label>
+        <select class="form-select" id="cd_paid">
+          <option value="true" ${client.paid ? "selected" : ""}>Paid</option>
+          <option value="false" ${client.paid ? "" : "selected"}>Unpaid</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Updates Per Month</label>
+        <input class="form-input" id="cd_updatesPerMonth" type="number" min="0" value="${Number.isFinite(client.updatesPerMonth) ? client.updatesPerMonth : 0}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Updates Remaining</label>
+        <input class="form-input" id="cd_updatesRemaining" type="number" min="0" value="${Number.isFinite(client.updatesRemaining) ? client.updatesRemaining : 0}">
+      </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Last Payment Note</label>
+        <input class="form-input" id="cd_lastPaymentNote" value="${escHtmlAttr(client.lastPaymentNote || "")}" placeholder="e.g. Paid Mar 2 via ACH">
+      </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Billing Notes</label>
+        <textarea class="form-input form-textarea" id="cd_billingNotes" rows="3">${escHtml(client.billingNotes || "")}</textarea>
+      </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Internal Notes</label>
+        <textarea class="form-input form-textarea" id="cd_notes" rows="4">${escHtml(client.notes || "")}</textarea>
+      </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Billing History (Manual)</label>
+        <div class="billing-list">${historyHtml}</div>
+        <div class="inline-form-row">
+          <input class="form-input" id="cd_historyDate" type="date" value="${todayStr()}">
+          <input class="form-input" id="cd_historyNote" placeholder="Payment/event note">
+          <button class="btn btn-ghost" type="button" onclick="addClientBillingEntry()">Add Entry</button>
+        </div>
+      </div>
+    </div>
+    <div class="client-detail-actions">
+      <button class="btn btn-primary" type="button" onclick="saveClientDetail()">Save Client</button>
+    </div>
+  `;
+}
+
+window.saveClientDetail = async function () {
+  if (!selectedClientId) return;
+  try {
+    const updates = {
+      companyName: document.getElementById("cd_companyName").value.trim(),
+      contactName: document.getElementById("cd_contactName").value.trim(),
+      email: document.getElementById("cd_email").value.trim(),
+      authUid: document.getElementById("cd_authUid").value.trim(),
+      planName: document.getElementById("cd_planName").value.trim(),
+      status: document.getElementById("cd_status").value,
+      recurring: document.getElementById("cd_recurring").value === "true",
+      paid: document.getElementById("cd_paid").value === "true",
+      updatesPerMonth: Number(document.getElementById("cd_updatesPerMonth").value || 0),
+      updatesRemaining: Number(document.getElementById("cd_updatesRemaining").value || 0),
+      lastPaymentNote: document.getElementById("cd_lastPaymentNote").value.trim(),
+      billingNotes: document.getElementById("cd_billingNotes").value.trim(),
+      notes: document.getElementById("cd_notes").value.trim(),
+      updatedAt: serverTimestamp(),
+    };
+    await updateDoc(doc(db, "clients", selectedClientId), updates);
+
+    if (updates.authUid) {
+      await setDoc(doc(db, "users", updates.authUid), {
+        role: "client",
+        clientId: selectedClientId,
+        email: updates.email || "",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }
+  } catch (err) {
+    console.error("saveClientDetail:", err);
+    alert("Save failed: " + err.message);
+  }
+};
+
+window.addClientBillingEntry = async function () {
+  if (!selectedClientId) return;
+  const client = currentClients.find((c) => c.id === selectedClientId);
+  if (!client) return;
+
+  const date = document.getElementById("cd_historyDate")?.value || todayStr();
+  const note = document.getElementById("cd_historyNote")?.value.trim() || "";
+  if (!note) { alert("Enter a billing note first."); return; }
+
+  const existing = Array.isArray(client.billingHistory) ? client.billingHistory : [];
+  const next = [{ id: uid(), date, note }, ...existing].slice(0, 60);
+  try {
+    await updateDoc(doc(db, "clients", selectedClientId), {
+      billingHistory: next,
+      updatedAt: serverTimestamp(),
+    });
+    const noteEl = document.getElementById("cd_historyNote");
+    if (noteEl) noteEl.value = "";
+  } catch (err) {
+    console.error("addClientBillingEntry:", err);
+    alert("Could not add billing entry.");
+  }
+};
+
+function requestStatusClass(status) {
+  if (status === "in_review") return "rs-in_review";
+  if (status === "scheduled") return "rs-scheduled";
+  if (status === "done") return "rs-done";
+  return "rs-submitted";
+}
+
+function requestStatusLabel(status) {
+  if (status === "in_review") return "In Review";
+  if (status === "scheduled") return "Scheduled";
+  if (status === "done") return "Done";
+  return "Submitted";
+}
+
+function renderClientRequestsAdmin(requests) {
+  const body = document.getElementById("clientRequestsBody");
+  if (!body) return;
+  body.innerHTML = "";
+  if (!requests.length) {
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state" style="margin:24px 0">No client requests yet.</div></td></tr>`;
+    return;
+  }
+
+  requests.forEach((req) => {
+    const tr = document.createElement("tr");
+    const updatedDate = req.updatedAt?.toDate
+      ? req.updatedAt.toDate().toLocaleDateString("en-US", { month: "short", day: "numeric" })
+      : (req.createdAt?.toDate
+        ? req.createdAt.toDate().toLocaleDateString("en-US", { month: "short", day: "numeric" })
+        : "—");
+    tr.innerHTML = `
+      <td>${escHtml(req.clientName || "Unknown")}</td>
+      <td>${escHtml(req.title || "Untitled request")}</td>
+      <td>${escHtml(req.category || "general")}</td>
+      <td>${escHtml(req.priority || "normal")}</td>
+      <td><span class="req-status ${requestStatusClass(req.status)}">${requestStatusLabel(req.status)}</span></td>
+      <td><span class="date-text">${updatedDate}</span></td>
+      <td><button class="card-btn" onclick="openRequestDetail('${req.id}')">Manage</button></td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+window.openRequestDetail = function (id) {
+  const req = currentClientRequests.find((r) => r.id === id);
+  if (!req) return;
+  editingRequestId = id;
+  document.getElementById("requestDetailBody").innerHTML = `
+    <div class="detail-grid">
+      <div class="form-group">
+        <label class="form-label">Client</label>
+        <div class="detail-meta-value">${escHtml(req.clientName || "Unknown")}</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <div class="detail-meta-value">${escHtml(req.category || "general")}</div>
+      </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Title</label>
+        <input class="form-input" id="rd_title" value="${escHtmlAttr(req.title || "")}" readonly>
+      </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Description</label>
+        <textarea class="form-input form-textarea" id="rd_description" rows="4" readonly>${escHtml(req.description || "")}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Priority</label>
+        <select class="form-select" id="rd_priority">
+          <option value="low" ${req.priority === "low" ? "selected" : ""}>Low</option>
+          <option value="normal" ${(!req.priority || req.priority === "normal") ? "selected" : ""}>Normal</option>
+          <option value="high" ${req.priority === "high" ? "selected" : ""}>High</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-select" id="rd_status">
+          <option value="submitted" ${req.status === "submitted" ? "selected" : ""}>Submitted</option>
+          <option value="in_review" ${req.status === "in_review" ? "selected" : ""}>In Review</option>
+          <option value="scheduled" ${req.status === "scheduled" ? "selected" : ""}>Scheduled</option>
+          <option value="done" ${req.status === "done" ? "selected" : ""}>Done</option>
+        </select>
+      </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Internal Notes</label>
+        <textarea class="form-input form-textarea" id="rd_internalNotes" rows="4">${escHtml(req.internalNotes || "")}</textarea>
+      </div>
+    </div>
+  `;
+
+  const pushBtn = document.getElementById("requestPushBtn");
+  if (pushBtn) {
+    pushBtn.textContent = req.pipelineId ? "Already in Pipeline" : "Push to Pipeline";
+    pushBtn.disabled = Boolean(req.pipelineId);
+  }
+
+  document.getElementById("requestDetailOverlay").classList.add("open");
+};
+
+window.closeRequestDetail = function () {
+  document.getElementById("requestDetailOverlay").classList.remove("open");
+  editingRequestId = null;
+};
+
+window.saveRequestDetail = async function () {
+  if (!editingRequestId) return;
+  try {
+    await updateDoc(doc(db, "client_requests", editingRequestId), {
+      priority: document.getElementById("rd_priority").value,
+      status: document.getElementById("rd_status").value,
+      internalNotes: document.getElementById("rd_internalNotes").value.trim(),
+      updatedAt: serverTimestamp(),
+    });
+    closeRequestDetail();
+  } catch (err) {
+    console.error("saveRequestDetail:", err);
+    alert("Could not save request.");
+  }
+};
+
+function requestCategoryToService(category) {
+  const c = String(category || "").toLowerCase();
+  if (c.includes("workflow") || c.includes("automation")) return "AI Workflow";
+  if (c.includes("website") || c.includes("content")) return "Website Build";
+  return "Other";
+}
+
+window.pushRequestToPipeline = async function () {
+  if (!editingRequestId) return;
+  const req = currentClientRequests.find((r) => r.id === editingRequestId);
+  if (!req || req.pipelineId) return;
+  try {
+    const leadRef = await addDoc(collection(db, "pipeline"), {
+      title: `${req.clientName || "Client"} — ${req.title || "Request"}`,
+      company: req.clientName || "",
+      contact: req.clientEmail || "",
+      service: requestCategoryToService(req.category),
+      status: "leads",
+      note: [
+        "Source: client request",
+        `Category: ${req.category || "general"}`,
+        `Priority: ${req.priority || "normal"}`,
+        "",
+        req.description || "",
+      ].join("\n"),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    await updateDoc(doc(db, "client_requests", editingRequestId), {
+      pipelineId: leadRef.id,
+      status: "in_review",
+      updatedAt: serverTimestamp(),
+    });
+
+    const pushBtn = document.getElementById("requestPushBtn");
+    if (pushBtn) {
+      pushBtn.textContent = "Already in Pipeline";
+      pushBtn.disabled = true;
+    }
+  } catch (err) {
+    console.error("pushRequestToPipeline:", err);
+    alert("Could not push request to pipeline.");
+  }
+};
+
+document.getElementById("requestDetailOverlay")?.addEventListener("click", function (e) {
+  if (e.target === this) window.closeRequestDetail();
+});
+
 // DECISIONS
 // Schema (each document):
 //   meetingTitle : string    — the meeting name / label
@@ -672,7 +1129,12 @@ window.openAddModal = function (type, context) {
   modalMode    = type || currentPage;
   modalContext = context || "";
 
-  const titles = { pipeline: "ADD LEAD", tasks: "ADD TASK", decisions: "LOG MEETING" };
+  const titles = {
+    pipeline: "ADD LEAD",
+    tasks: "ADD TASK",
+    decisions: "LOG MEETING",
+    clients: "ADD CLIENT",
+  };
   document.getElementById("modalTitle").textContent = titles[modalMode] || "ADD";
 
   document.getElementById("modalBody").innerHTML = getModalForm(modalMode);
@@ -692,7 +1154,12 @@ document.getElementById("modalOverlay")?.addEventListener("click", function (e) 
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { window.closeModal(); window.closeLeadDetail(); window.closeTaskDetail(); }
+  if (e.key === "Escape") {
+    window.closeModal();
+    window.closeLeadDetail();
+    window.closeTaskDetail();
+    window.closeRequestDetail();
+  }
 });
 
 function getModalForm(mode) {
@@ -780,6 +1247,74 @@ function getModalForm(mode) {
       <button type="button" class="btn btn-ghost add-decision-row-btn" onclick="addDecisionRow()">
         + Add new decision
       </button>
+    `;
+  }
+
+  if (mode === "clients") {
+    return `
+      <div class="form-group">
+        <label class="form-label">Company Name</label>
+        <input class="form-input" id="f_companyName" placeholder="Client company">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contact Name</label>
+        <input class="form-input" id="f_contactName" placeholder="Primary contact">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contact Email</label>
+        <input class="form-input" id="f_email" placeholder="contact@company.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Client Auth UID</label>
+        <input class="form-input" id="f_authUid" placeholder="Firebase Auth UID">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Plan Name</label>
+        <input class="form-input" id="f_planName" placeholder="Growth Retainer">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-select" id="f_clientStatus">
+          <option value="active" selected>Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="one-time">One-Time</option>
+          <option value="completed">Completed</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Recurring</label>
+        <select class="form-select" id="f_recurring">
+          <option value="true" selected>Recurring</option>
+          <option value="false">One-Time</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Paid</label>
+        <select class="form-select" id="f_paid">
+          <option value="true">Paid</option>
+          <option value="false" selected>Unpaid</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Updates / Month</label>
+        <input class="form-input" id="f_updatesPerMonth" type="number" min="0" value="4">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Updates Remaining</label>
+        <input class="form-input" id="f_updatesRemaining" type="number" min="0" value="4">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Last Payment Note</label>
+        <input class="form-input" id="f_lastPaymentNote" placeholder="e.g. Paid Mar 9 via ACH">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Billing Notes</label>
+        <textarea class="form-input form-textarea" id="f_billingNotes" rows="3" placeholder="Manual billing notes"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Internal Notes</label>
+        <textarea class="form-input form-textarea" id="f_clientNotes" rows="3" placeholder="General context"></textarea>
+      </div>
     `;
   }
   return "";
@@ -898,6 +1433,46 @@ window.saveModal = async function () {
       });
     }
 
+    else if (modalMode === "clients") {
+      const companyName = document.getElementById("f_companyName").value.trim();
+      if (!companyName) { alert("Company name is required."); return; }
+
+      const authUid = document.getElementById("f_authUid").value.trim();
+      const email = document.getElementById("f_email").value.trim();
+      const updatesPerMonth = Math.max(0, Number(document.getElementById("f_updatesPerMonth").value || 0));
+      const updatesRemaining = Math.max(0, Number(document.getElementById("f_updatesRemaining").value || 0));
+
+      const clientRef = await addDoc(collection(db, "clients"), {
+        companyName,
+        contactName: document.getElementById("f_contactName").value.trim(),
+        email,
+        authUid,
+        planName: document.getElementById("f_planName").value.trim(),
+        recurring: document.getElementById("f_recurring").value === "true",
+        paid: document.getElementById("f_paid").value === "true",
+        status: document.getElementById("f_clientStatus").value,
+        updatesPerMonth,
+        updatesRemaining,
+        notes: document.getElementById("f_clientNotes").value.trim(),
+        lastPaymentNote: document.getElementById("f_lastPaymentNote").value.trim(),
+        billingNotes: document.getElementById("f_billingNotes").value.trim(),
+        billingHistory: [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      selectedClientId = clientRef.id;
+
+      if (authUid) {
+        await setDoc(doc(db, "users", authUid), {
+          role: "client",
+          clientId: clientRef.id,
+          email: email || "",
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
+    }
+
     window.closeModal();
   } catch (err) {
     console.error("saveModal:", err);
@@ -921,7 +1496,12 @@ window.showPage = function (name, el) {
   if (sidebarItem) sidebarItem.classList.add("active");
   if (topNavItem)  topNavItem.classList.add("active");
 
-  const titles = { pipeline: "PIPELINE", tasks: "TASKS", decisions: "DECISIONS LOG" };
+  const titles = {
+    pipeline: "PIPELINE",
+    tasks: "TASKS",
+    decisions: "DECISIONS LOG",
+    clients: "CLIENT OPS",
+  };
   const el2    = document.getElementById("pageTitle");
   if (el2) el2.textContent = titles[name] || name.toUpperCase();
 };
@@ -951,3 +1531,4 @@ function todayStr() {
 function uid() {
   return "_" + Math.random().toString(36).slice(2, 11);
 }
+

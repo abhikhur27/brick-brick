@@ -1,6 +1,28 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasUserRecord() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return hasUserRecord()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    function isClient() {
+      return hasUserRecord()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "client";
+    }
+
+    function myClientId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.clientId;
+    }
 
     // Allow public website form to create only constrained lead records.
     function isAllowedService(svc) {
@@ -38,27 +60,92 @@ service cloud.firestore {
         && request.resource.data.updatedAt is timestamp;
     }
 
-    // TEAM WORKSPACE
-    // Tasks and decisions remain auth-only.
+    function isAllowedRequestCategory(cat) {
+      return cat == "issue"
+        || cat == "website_change"
+        || cat == "workflow_tweak"
+        || cat == "automation_adjustment"
+        || cat == "content_update"
+        || cat == "general_support";
+    }
+
+    function isAllowedRequestPriority(priority) {
+      return priority == "low"
+        || priority == "normal"
+        || priority == "high";
+    }
+
+    function isClientRequestCreate() {
+      return isClient()
+        && request.resource.data.keys().hasOnly([
+          "clientId",
+          "clientName",
+          "clientEmail",
+          "title",
+          "description",
+          "category",
+          "priority",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "source"
+        ])
+        && request.resource.data.clientId == myClientId()
+        && request.resource.data.clientName is string
+        && request.resource.data.clientName.size() > 0
+        && request.resource.data.clientName.size() <= 160
+        && request.resource.data.clientEmail is string
+        && request.resource.data.clientEmail.size() <= 200
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 140
+        && request.resource.data.description is string
+        && request.resource.data.description.size() > 0
+        && request.resource.data.description.size() <= 4000
+        && isAllowedRequestCategory(request.resource.data.category)
+        && isAllowedRequestPriority(request.resource.data.priority)
+        && request.resource.data.status == "submitted"
+        && request.resource.data.source == "client-dashboard"
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    match /users/{uid} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
+      allow write: if isAdmin();
+    }
+
+    // INTERNAL TEAM WORKSPACE
     match /pipeline/{docId} {
-      allow read, update, delete: if request.auth != null;
-      allow create: if request.auth != null || isPublicPipelineLeadCreate();
+      allow read, update, delete: if isAdmin();
+      allow create: if isAdmin() || isPublicPipelineLeadCreate();
     }
 
     match /tasks/{docId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isAdmin();
     }
 
     match /decisions/{docId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isAdmin();
+    }
+
+    match /clients/{clientId} {
+      allow read: if isAdmin() || (isClient() && myClientId() == clientId);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /client_requests/{requestId} {
+      allow read: if isAdmin() || (isClient() && resource.data.clientId == myClientId());
+      allow create: if isAdmin() || isClientRequestCreate();
+      allow update, delete: if isAdmin();
     }
 
     // CONTACT FORM SUBMISSIONS
     // Public visitors can create a submission.
-    // Team members can read/update/delete while authenticated.
+    // Team admins can read/update/delete.
     match /contact_submissions/{docId} {
       allow create: if true;
-      allow read, update, delete: if request.auth != null;
+      allow read, update, delete: if isAdmin();
     }
   }
 }

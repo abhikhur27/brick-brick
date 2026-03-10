@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BrickBrick | Client Panel</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="client.css">
+</head>
+<body>
+
+<div id="clientLoginScreen">
+  <div class="login-box">
+    <div class="login-brand">BRICKBRICK</div>
+    <div class="login-sub">Client Panel</div>
+
+    <form id="clientLoginForm" novalidate>
+      <label class="login-label" for="clientLoginEmail">Email</label>
+      <input class="login-input" type="email" id="clientLoginEmail" placeholder="you@company.com" autocomplete="email" required>
+
+      <label class="login-label" for="clientLoginPassword">Password</label>
+      <input class="login-input" type="password" id="clientLoginPassword" placeholder="Password" autocomplete="current-password" required>
+
+      <button class="login-btn" id="clientLoginBtn" type="submit">ENTER CLIENT PANEL</button>
+      <div class="login-error" id="clientLoginError"></div>
+    </form>
+
+    <a class="back-link" href="/">Back to site</a>
+  </div>
+</div>
+
+<div id="clientApp">
+  <header class="client-topbar">
+    <div class="brand-wrap">
+      <div class="brand-main">BRICKBRICK</div>
+      <div class="brand-subline">Client Workspace</div>
+    </div>
+    <div class="topbar-actions">
+      <a class="btn btn-ghost" href="/">Back to site</a>
+      <a class="btn btn-ghost" href="portal.html">Team portal</a>
+      <button class="btn btn-primary" id="clientLogoutBtn" type="button">Log out</button>
+    </div>
+  </header>
+
+  <main class="client-content">
+    <section class="client-hero-card" id="clientHeroCard">
+      <div class="hero-title-row">
+        <h1 id="cpCompanyName">Client Account</h1>
+        <span class="status-pill" id="cpAccountStatus">Active</span>
+      </div>
+      <div class="hero-sub" id="cpSignedInAs">Signed in</div>
+      <div class="metrics-grid">
+        <div class="metric">
+          <div class="metric-label">Plan</div>
+          <div class="metric-value" id="cpPlanName">-</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Plan Type</div>
+          <div class="metric-value" id="cpRecurring">-</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Updates Remaining</div>
+          <div class="metric-value" id="cpUpdatesRemaining">-</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Payment Status</div>
+          <div class="metric-value" id="cpPaymentStatus">-</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel-grid">
+      <article class="panel-card">
+        <h2>Submit Request</h2>
+        <p class="panel-copy">
+          Submit issues, website edits, workflow tweaks, automation adjustments, content updates, or general support.
+        </p>
+        <form id="clientRequestForm" class="request-form" novalidate>
+          <label>
+            Title
+            <input type="text" id="crTitle" maxlength="140" placeholder="Short request title" required>
+          </label>
+          <label>
+            Category
+            <select id="crCategory">
+              <option value="issue">Issue</option>
+              <option value="website_change">Website Change Request</option>
+              <option value="workflow_tweak">Workflow Tweak</option>
+              <option value="automation_adjustment">Automation Adjustment</option>
+              <option value="content_update">Content Update Request</option>
+              <option value="general_support">General Support</option>
+            </select>
+          </label>
+          <label>
+            Priority (optional)
+            <select id="crPriority">
+              <option value="normal" selected>Normal</option>
+              <option value="low">Low</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <label>
+            Description
+            <textarea id="crDescription" rows="5" maxlength="4000" placeholder="Describe what you need changed or fixed." required></textarea>
+          </label>
+          <button class="btn btn-primary full" id="crSubmitBtn" type="submit">Submit request</button>
+          <p class="form-status" id="crStatus"></p>
+        </form>
+      </article>
+
+      <article class="panel-card">
+        <h2>Billing & History</h2>
+        <div class="history-block">
+          <div class="history-label">Last payment note</div>
+          <div class="history-value" id="cpLastPaymentNote">-</div>
+        </div>
+        <div class="history-block">
+          <div class="history-label">Billing notes</div>
+          <div class="history-value" id="cpBillingNotes">-</div>
+        </div>
+        <div class="history-block">
+          <div class="history-label">Manual billing history</div>
+          <div class="history-list" id="cpBillingHistory"></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel-card">
+      <h2>Your Requests</h2>
+      <div class="table-wrap">
+        <table class="requests-table">
+          <thead>
+            <tr>
+              <th>Created</th>
+              <th>Title</th>
+              <th>Category</th>
+              <th>Priority</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="clientRequestsBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script type="module" src="client.js"></script>
+</body>
+</html>

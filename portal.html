@@ -40,6 +40,9 @@
       <div class="nav-item" data-page="tasks" onclick="showPage('tasks', this)">
         <span class="nav-icon">▣</span> Tasks
       </div>
+      <div class="nav-item" data-page="clients" onclick="showPage('clients', this)">
+        <span class="nav-icon">C</span> Clients
+      </div>
       <div class="nav-item" data-page="decisions" onclick="showPage('decisions', this)">
         <span class="nav-icon">◎</span> Decisions Log
       </div>
@@ -67,6 +70,7 @@
     <div class="top-nav">
       <div class="top-nav-item active" id="tnav-pipeline" onclick="showPage('pipeline', this, 'tnav')">◈ Pipeline</div>
       <div class="top-nav-item" id="tnav-tasks" onclick="showPage('tasks', this, 'tnav')">▣ Tasks</div>
+      <div class="top-nav-item" id="tnav-clients" onclick="showPage('clients', this, 'tnav')">C Clients</div>
       <div class="top-nav-item" id="tnav-decisions" onclick="showPage('decisions', this, 'tnav')">◎ Decisions Log</div>
     </div>
 
@@ -135,6 +139,50 @@
         <div class="decisions-log" id="decisionsLog"></div>
       </div>
 
+      <!-- CLIENTS PAGE -->
+      <div class="page" id="page-clients">
+        <div class="clients-layout">
+          <section class="clients-list-column">
+            <div class="clients-group">
+              <div class="clients-group-title">Active Recurring</div>
+              <div class="clients-list" id="clientsActiveList"></div>
+            </div>
+            <div class="clients-group">
+              <div class="clients-group-title">One-Time Service</div>
+              <div class="clients-list" id="clientsOneTimeList"></div>
+            </div>
+            <div class="clients-group">
+              <div class="clients-group-title">Inactive / Completed</div>
+              <div class="clients-list" id="clientsInactiveList"></div>
+            </div>
+          </section>
+
+          <section class="clients-detail-column">
+            <div id="clientDetailPane" class="empty-state">Select a client record to edit plan, billing, and notes.</div>
+          </section>
+        </div>
+
+        <section class="clients-requests">
+          <h3 class="tasks-section-title">Client Requests</h3>
+          <div class="tasks-wrap">
+            <table class="tasks">
+              <thead>
+                <tr>
+                  <th>Client</th>
+                  <th>Request</th>
+                  <th>Category</th>
+                  <th>Priority</th>
+                  <th>Status</th>
+                  <th>Updated</th>
+                  <th style="width:112px"></th>
+                </tr>
+              </thead>
+              <tbody id="clientRequestsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
     </div>
   </main>
 </div>
@@ -177,6 +225,20 @@
   </div>
 </div>
 
+<!-- ─── REQUEST DETAIL MODAL ──────────────────────────────── -->
+<div class="modal-overlay" id="requestDetailOverlay">
+  <div class="modal modal-wide" id="requestDetailBox">
+    <div class="modal-title">CLIENT REQUEST</div>
+    <div id="requestDetailBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeRequestDetail()">Close</button>
+      <button class="btn btn-ghost" id="requestPushBtn" onclick="pushRequestToPipeline()">Push to Pipeline</button>
+      <button class="btn btn-primary" onclick="saveRequestDetail()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 <script type="module" src="portal.js"></script>
 </body>
 </html>
+

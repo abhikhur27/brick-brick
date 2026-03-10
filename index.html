@@ -26,6 +26,7 @@
         <a href="#process">Process</a>
         <a href="#team">Founders</a>
         <a href="#contact">Contact</a>
+        <a href="client.html" class="nav-button secondary">Client Login</a>
         <a href="portal.html" class="nav-button secondary">Team Portal</a>
       </nav>
 
@@ -37,6 +38,7 @@
       <a href="#process">Process</a>
       <a href="#team">Founders</a>
       <a href="#contact">Contact</a>
+      <a href="client.html">Client Login</a>
       <a href="portal.html">Team Portal</a>
     </div>
   </header>
@@ -275,7 +277,7 @@
           <h2>Want a site, workflow, or internal tool built?</h2>
           <p class="contact-copy">Send us a message and we'll follow up within one business day.</p>
           <div class="contact-list">
-            <div><strong>Email</strong><span><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="f99a96978d989a8db99b8b909a92d49b8b909a92d7968b9e">[email&#160;protected]</a></span></div>
+            <div><strong>Email</strong><span><a href="mailto:contact@brick-brick.org">contact@brick-brick.org</a></span></div>
             <div><strong>Location</strong><span>Dallas / Remote</span></div>
             <div><strong>Best fit</strong><span>Businesses that want modern websites and better internal systems</span></div>
           </div>
@@ -328,9 +330,52 @@
   <footer class="site-footer">
     <div class="container footer-wrap">
       <p>© <span id="year"></span> BrickBrick.</p>
-      <a href="portal.html">Open team portal</a>
+      <div class="footer-links">
+        <a href="client.html">Client login</a>
+        <a href="portal.html">Open team portal</a>
+      </div>
     </div>
   </footer>
+  <div class="ai-chat-shell" id="aiChatShell">
+    <button
+      type="button"
+      class="ai-chat-toggle"
+      id="aiChatToggle"
+      aria-expanded="false"
+      aria-controls="aiChatPanel"
+    >
+      Ask BrickBrick AI
+    </button>
+
+    <section class="ai-chat-panel" id="aiChatPanel" aria-hidden="true">
+      <div class="ai-chat-header">
+        <strong>BrickBrick AI</strong>
+        <button type="button" class="ai-chat-close" id="aiChatClose" aria-label="Close assistant">x</button>
+      </div>
+
+      <div class="ai-chat-messages" id="aiChatMessages">
+        <div class="ai-msg ai-msg-bot">
+          <div class="ai-msg-bubble">
+            Ask me about services, timelines, and project fit. For exact pricing, use the contact form.
+          </div>
+        </div>
+      </div>
+
+      <p class="ai-chat-status" id="aiChatStatus" aria-live="polite"></p>
+
+      <form class="ai-chat-form" id="aiChatForm" novalidate>
+        <input
+          type="text"
+          id="aiChatInput"
+          maxlength="500"
+          placeholder="What are you looking to build?"
+          autocomplete="off"
+        >
+        <button type="submit" id="aiChatSend">Send</button>
+      </form>
+    </section>
+  </div>
+
   <!-- Required: loads nav, contact webhook handler, and footer year -->
   <script type="module" src="main.js"></script>
 </body>
