@@ -29,6 +29,8 @@ let currentClientId = null;
 let currentClient = null;
 let unsubClientDoc = null;
 let unsubRequests = null;
+let currentRequests = [];
+let activeRequestId = null;
 
 document.body.style.visibility = "hidden";
 
@@ -45,6 +47,9 @@ const logoutBtn = document.getElementById("clientLogoutBtn");
 const requestForm = document.getElementById("clientRequestForm");
 const requestBtn = document.getElementById("crSubmitBtn");
 const requestStatus = document.getElementById("crStatus");
+const requestDetailOverlay = document.getElementById("clientRequestDetailOverlay");
+const requestDetailBody = document.getElementById("clientRequestDetailBody");
+const requestCloseBtn = document.getElementById("clientRequestCloseBtn");
 
 loginForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -119,6 +124,16 @@ requestForm?.addEventListener("submit", async (event) => {
   } finally {
     requestBtn.disabled = false;
     requestBtn.textContent = "Submit request";
+  }
+});
+
+requestCloseBtn?.addEventListener("click", closeClientRequestDetail);
+requestDetailOverlay?.addEventListener("click", (event) => {
+  if (event.target === requestDetailOverlay) closeClientRequestDetail();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && requestDetailOverlay?.classList.contains("open")) {
+    closeClientRequestDetail();
   }
 });
 
@@ -330,11 +345,22 @@ function startClientListeners(clientId) {
         const bs = b.createdAt?.seconds || 0;
         return bs - as;
       });
+      currentRequests = requests;
       renderRequestRows(requests);
+      if (activeRequestId) {
+        const activeReq = currentRequests.find((req) => req.id === activeRequestId);
+        if (activeReq) {
+          renderClientRequestDetail(activeReq);
+        } else {
+          closeClientRequestDetail();
+        }
+      }
     },
     (err) => {
       console.error("client requests listener:", err);
+      currentRequests = [];
       renderRequestRows([]);
+      closeClientRequestDetail();
     }
   );
 }
@@ -344,12 +370,15 @@ function stopClientListeners() {
   if (unsubRequests) unsubRequests();
   unsubClientDoc = null;
   unsubRequests = null;
+  currentRequests = [];
+  closeClientRequestDetail();
 }
 
 function renderMissingClient() {
   const company = document.getElementById("cpCompanyName");
   if (company) company.textContent = "Client record not found";
   renderRequestRows([]);
+  closeClientRequestDetail();
 }
 
 function renderClientSummary(client) {
@@ -397,6 +426,9 @@ function renderRequestRows(requests) {
 
   requests.forEach((req) => {
     const tr = document.createElement("tr");
+    tr.className = "request-row";
+    tr.setAttribute("tabindex", "0");
+    tr.title = "Click to view full request details and timeline updates.";
     tr.innerHTML = `
       <td>${escHtml(formatTimestamp(req.createdAt))}</td>
       <td>${escHtml(req.title || "Untitled request")}</td>
@@ -404,8 +436,155 @@ function renderRequestRows(requests) {
       <td>${escHtml(priorityLabel(req.priority || "normal"))}</td>
       <td><span class="req-status ${requestStatusClass(req.status)}">${escHtml(statusLabel(req.status || "submitted"))}</span></td>
     `;
+    tr.addEventListener("click", () => openClientRequestDetail(req.id));
+    tr.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openClientRequestDetail(req.id);
+      }
+    });
     tbody.appendChild(tr);
   });
+}
+
+function openClientRequestDetail(requestId) {
+  const req = currentRequests.find((item) => item.id === requestId);
+  if (!req || !requestDetailOverlay || !requestDetailBody) return;
+  activeRequestId = requestId;
+  renderClientRequestDetail(req);
+  requestDetailOverlay.classList.add("open");
+}
+
+function closeClientRequestDetail() {
+  requestDetailOverlay?.classList.remove("open");
+  activeRequestId = null;
+}
+
+function renderClientRequestDetail(req) {
+  if (!requestDetailBody) return;
+  const timeline = buildClientTimeline(req);
+  const timelineHtml = timeline.length
+    ? timeline
+      .map((entry) => {
+        const statusChip = entry.status
+          ? `<span class="req-status ${requestStatusClass(entry.status)}">${escHtml(statusLabel(entry.status))}</span>`
+          : `<span class="timeline-chip">${escHtml(timelineKindLabel(entry.kind))}</span>`;
+        return `
+          <div class="timeline-item">
+            <div class="timeline-item-head">
+              <div class="timeline-item-top">
+                ${statusChip}
+                <span class="timeline-item-time">${escHtml(formatDateTime(entry.createdAtMs))}</span>
+              </div>
+              <div class="timeline-item-meta">${escHtml(entry.actor || "Team")}</div>
+            </div>
+            <div class="timeline-item-text">${escHtml(timelineEntryText(entry))}</div>
+          </div>
+        `;
+      })
+      .join("")
+    : `<div class="empty-state">No timeline updates yet.</div>`;
+
+  requestDetailBody.innerHTML = `
+    <div class="client-detail-grid">
+      <div class="client-detail-field">
+        <div class="client-detail-label">Title</div>
+        <div class="client-detail-value">${escHtml(req.title || "Untitled request")}</div>
+      </div>
+      <div class="client-detail-field">
+        <div class="client-detail-label">Status</div>
+        <div class="client-detail-value">
+          <span class="req-status ${requestStatusClass(req.status)}">${escHtml(statusLabel(req.status || "submitted"))}</span>
+        </div>
+      </div>
+      <div class="client-detail-field">
+        <div class="client-detail-label">Category</div>
+        <div class="client-detail-value">${escHtml(categoryLabel(req.category))}</div>
+      </div>
+      <div class="client-detail-field">
+        <div class="client-detail-label">Priority</div>
+        <div class="client-detail-value">${escHtml(priorityLabel(req.priority || "normal"))}</div>
+      </div>
+      <div class="client-detail-field">
+        <div class="client-detail-label">Created</div>
+        <div class="client-detail-value">${escHtml(formatDateTime(toMillis(req.createdAt)))}</div>
+      </div>
+      <div class="client-detail-field">
+        <div class="client-detail-label">Last Updated</div>
+        <div class="client-detail-value">${escHtml(formatDateTime(toMillis(req.updatedAt) || toMillis(req.createdAt)))}</div>
+      </div>
+    </div>
+
+    <div class="client-detail-section">
+      <div class="client-detail-label">Description</div>
+      <div class="client-detail-description">${escHtml(req.description || "-")}</div>
+    </div>
+
+    <div class="client-detail-section">
+      <div class="client-detail-label">Timeline & Team Updates</div>
+      <div class="timeline-list">${timelineHtml}</div>
+    </div>
+  `;
+}
+
+function buildClientTimeline(req) {
+  const timeline = [];
+  const raw = Array.isArray(req.timeline) ? req.timeline : [];
+  raw.forEach((entry) => {
+    if (!entry || typeof entry !== "object") return;
+    const visibility = String(entry.visibility || "client");
+    if (visibility === "internal") return;
+    timeline.push({
+      id: String(entry.id || ""),
+      kind: String(entry.kind || entry.type || "note"),
+      status: String(entry.status || ""),
+      text: String(entry.text || entry.note || entry.message || ""),
+      actor: String(entry.actor || entry.author || "Team"),
+      createdAtMs: toMillis(entry.createdAtMs)
+        || toMillis(entry.createdAt)
+        || toMillis(entry.timestamp),
+    });
+  });
+
+  const createdMs = toMillis(req.createdAt) || toMillis(req.updatedAt) || Date.now();
+  if (!timeline.some((entry) => entry.kind === "submitted")) {
+    timeline.push({
+      id: "submitted_fallback",
+      kind: "submitted",
+      status: "submitted",
+      text: "Request submitted.",
+      actor: req.clientName || "You",
+      createdAtMs: createdMs,
+    });
+  }
+
+  const currentStatus = String(req.status || "submitted");
+  if (!timeline.some((entry) => entry.status === currentStatus)) {
+    timeline.push({
+      id: "status_fallback",
+      kind: "status",
+      status: currentStatus,
+      text: `Current status: ${statusLabel(currentStatus)}.`,
+      actor: "Team",
+      createdAtMs: toMillis(req.updatedAt) || createdMs,
+    });
+  }
+
+  timeline.sort((a, b) => a.createdAtMs - b.createdAtMs);
+  return timeline;
+}
+
+function timelineEntryText(entry) {
+  if (entry.text) return entry.text;
+  if (entry.status) return `Status changed to ${statusLabel(entry.status)}.`;
+  return "Team update posted.";
+}
+
+function timelineKindLabel(kind) {
+  if (kind === "flow") return "Pipeline";
+  if (kind === "status") return "Status";
+  if (kind === "submitted") return "Submitted";
+  return "Update";
 }
 
 function requestStatusClass(status) {
@@ -458,6 +637,33 @@ function formatTimestamp(ts) {
     day: "numeric",
     year: "numeric",
   });
+}
+
+function formatDateTime(ms) {
+  if (!ms) return "—";
+  return new Date(ms).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value === "object" && typeof value.toDate === "function") {
+    return value.toDate().getTime();
+  }
+  if (typeof value === "object" && Number.isFinite(value.seconds)) {
+    return Number(value.seconds) * 1000;
+  }
+  return 0;
 }
 
 function friendlyAuthError(code) {

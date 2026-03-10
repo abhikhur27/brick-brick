@@ -127,6 +127,7 @@
 
     <section class="panel-card">
       <h2>Your Requests</h2>
+      <p class="panel-copy compact">Click a request row to view full details and timeline updates.</p>
       <div class="table-wrap">
         <table class="requests-table">
           <thead>
@@ -143,6 +144,16 @@
       </div>
     </section>
   </main>
+</div>
+
+<div class="client-modal-overlay" id="clientRequestDetailOverlay">
+  <div class="client-modal">
+    <div class="client-modal-head">
+      <div class="client-modal-title">Request Detail</div>
+      <button class="btn btn-ghost" id="clientRequestCloseBtn" type="button">Close</button>
+    </div>
+    <div id="clientRequestDetailBody"></div>
+  </div>
 </div>
 
 <script type="module" src="client.js"></script>

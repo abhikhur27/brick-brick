@@ -3,7 +3,7 @@ import { initializeApp }          from "https://www.gstatic.com/firebasejs/10.12
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc,
-         onSnapshot, serverTimestamp, query, orderBy }
+         onSnapshot, serverTimestamp, query, orderBy, arrayUnion }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { firebaseConfig }          from "./firebase-config.js";
 
@@ -24,12 +24,20 @@ const COLS = [
   { key: "closed",    label: "Closed"         },
 ];
 
+const CLIENT_FLOW_COLS = [
+  { key: "queued",    label: "Queued" },
+  { key: "blueprint", label: "Blueprint" },
+  { key: "building",  label: "In Build" },
+  { key: "delivered", label: "Delivered" },
+];
+
 // ─── STATE CACHES (updated by real-time listeners) ───────────────────────────
 let currentPipeline  = [];
 let currentTasks     = [];
 let currentDecisions = [];
 let currentClients   = [];
 let currentClientRequests = [];
+let currentClientFlow = [];
 let currentManagedUsers = [];
 let currentProvisioning = [];
 let managedRecordsByKey = new Map();
@@ -44,6 +52,7 @@ let unsubTasks      = null;
 let unsubDecisions  = null;
 let unsubClients    = null;
 let unsubClientRequests = null;
+let unsubClientFlow = null;
 let unsubUsers = null;
 let unsubProvisioning = null;
 
@@ -179,6 +188,8 @@ onAuthStateChanged(auth, async (user) => {
 
   if (!user) {
     currentUserRole = null;
+    currentClientFlow = [];
+    currentClientRequests = [];
     currentManagedUsers = [];
     currentProvisioning = [];
     managedRecordsByKey = new Map();
@@ -294,6 +305,15 @@ function startListeners() {
     (err) => console.error("Client requests error:", err)
   );
 
+  unsubClientFlow = onSnapshot(
+    query(collection(db, "client_flow"), orderBy("createdAt", "desc")),
+    (snap) => {
+      currentClientFlow = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderClientFlowBoard(currentClientFlow);
+    },
+    (err) => console.error("Client flow error:", err)
+  );
+
   if (isSuperAdminRole(currentUserRole)) {
     startManagedUserListeners();
   } else {
@@ -317,12 +337,14 @@ function stopRealtimeListeners() {
   if (unsubDecisions) unsubDecisions();
   if (unsubClients) unsubClients();
   if (unsubClientRequests) unsubClientRequests();
+  if (unsubClientFlow) unsubClientFlow();
   stopManagedUserListeners();
   unsubPipeline = null;
   unsubTasks = null;
   unsubDecisions = null;
   unsubClients = null;
   unsubClientRequests = null;
+  unsubClientFlow = null;
 }
 
 function startManagedUserListeners() {
@@ -871,9 +893,14 @@ function renderClientDetailPane() {
   pane.classList.remove("empty-state");
   const history = Array.isArray(client.billingHistory) ? client.billingHistory : [];
   const historyHtml = history.length
-    ? history.map((entry) => `
-        <div class="billing-entry">
-          ${escHtml(entry.date || "—")} · ${escHtml(entry.note || "")}
+    ? history.map((entry, index) => `
+        <div class="billing-entry billing-entry-edit">
+          <input class="form-input billing-date-input" id="bh_date_${escHtmlAttr(entry.id || ("legacy_" + index))}" type="date" value="${escHtmlAttr(entry.date || todayStr())}">
+          <input class="form-input billing-note-input" id="bh_note_${escHtmlAttr(entry.id || ("legacy_" + index))}" value="${escHtmlAttr(entry.note || "")}" placeholder="Billing note">
+          <div class="billing-entry-actions">
+            <button class="card-btn" type="button" onclick="saveClientBillingEntry('${escHtmlAttr(entry.id || ("legacy_" + index))}')">Save</button>
+            <button class="card-btn delete" type="button" onclick="deleteClientBillingEntry('${escHtmlAttr(entry.id || ("legacy_" + index))}')">✕</button>
+          </div>
         </div>
       `).join("")
     : `<div class="billing-entry">No billing history entries yet.</div>`;
@@ -972,39 +999,49 @@ async function upsertClientUserLink(authUid, clientId, email) {
 }
 
 async function upsertClientProvisionRecord(clientId, clientData, options = {}) {
-  const nextEmail = normalizeEmail(clientData?.email);
-  const previousEmail = normalizeEmail(options.previousEmail);
+  try {
+    const nextEmail = normalizeEmail(clientData?.email);
+    const previousEmail = normalizeEmail(options.previousEmail);
 
-  if (previousEmail && previousEmail !== nextEmail) {
-    const previousRef = doc(db, "login_provisioning", previousEmail);
-    const previousSnap = await getDoc(previousRef);
-    if (previousSnap.exists()) {
-      const previous = previousSnap.data() || {};
-      if (String(previous.role || "") === "client" && String(previous.clientId || "") === clientId) {
-        await setDoc(previousRef, {
-          status: "disabled",
-          updatedAt: serverTimestamp(),
-          updatedByUid: auth.currentUser?.uid || "",
-        }, { merge: true });
+    if (previousEmail && previousEmail !== nextEmail) {
+      const previousRef = doc(db, "login_provisioning", previousEmail);
+      const previousSnap = await getDoc(previousRef);
+      if (previousSnap.exists()) {
+        const previous = previousSnap.data() || {};
+        if (String(previous.role || "") === "client" && String(previous.clientId || "") === clientId) {
+          await setDoc(previousRef, {
+            status: "disabled",
+            updatedAt: serverTimestamp(),
+            updatedByUid: auth.currentUser?.uid || "",
+          }, { merge: true });
+        }
       }
     }
+
+    if (!nextEmail) return false;
+
+    await setDoc(doc(db, "login_provisioning", nextEmail), {
+      email: nextEmail,
+      role: "client",
+      clientId,
+      name: String(clientData.contactName || clientData.companyName || ""),
+      notes: String(clientData.notes || ""),
+      status: "active",
+      authUid: String(clientData.authUid || ""),
+      updatedAt: serverTimestamp(),
+      updatedByUid: auth.currentUser?.uid || "",
+      createdAt: serverTimestamp(),
+      createdByUid: auth.currentUser?.uid || "",
+    }, { merge: true });
+
+    return true;
+  } catch (err) {
+    if (err?.code === "permission-denied") {
+      console.warn("Provisioning sync skipped: super admin required.");
+      return false;
+    }
+    throw err;
   }
-
-  if (!nextEmail) return;
-
-  await setDoc(doc(db, "login_provisioning", nextEmail), {
-    email: nextEmail,
-    role: "client",
-    clientId,
-    name: String(clientData.contactName || clientData.companyName || ""),
-    notes: String(clientData.notes || ""),
-    status: "active",
-    authUid: String(clientData.authUid || ""),
-    updatedAt: serverTimestamp(),
-    updatedByUid: auth.currentUser?.uid || "",
-    createdAt: serverTimestamp(),
-    createdByUid: auth.currentUser?.uid || "",
-  }, { merge: true });
 }
 
 window.saveClientDetail = async function () {
@@ -1038,13 +1075,17 @@ window.saveClientDetail = async function () {
       await upsertClientUserLink(authUid, selectedClientId, email);
     }
 
-    await upsertClientProvisionRecord(
+    const provisionSynced = await upsertClientProvisionRecord(
       selectedClientId,
       { ...updates, authUid },
       { previousEmail: existingClient?.email || "" }
     );
 
-    setElementStatus("managedProvisionStatus", "Client saved and provisioning updated.", false);
+    if (provisionSynced) {
+      setElementStatus("managedProvisionStatus", "Client saved and provisioning updated.", false);
+    } else {
+      setElementStatus("managedProvisionStatus", "Client saved. Provisioning sync requires super admin.", false);
+    }
   } catch (err) {
     console.error("saveClientDetail:", err);
     alert("Save failed: " + err.message);
@@ -1072,6 +1113,59 @@ window.addClientBillingEntry = async function () {
   } catch (err) {
     console.error("addClientBillingEntry:", err);
     alert("Could not add billing entry.");
+  }
+};
+
+window.saveClientBillingEntry = async function (entryId) {
+  if (!selectedClientId) return;
+  const client = currentClients.find((c) => c.id === selectedClientId);
+  if (!client) return;
+
+  const history = Array.isArray(client.billingHistory) ? [...client.billingHistory] : [];
+  const index = history.findIndex((entry, i) => String(entry.id || ("legacy_" + i)) === String(entryId));
+  if (index < 0) return;
+
+  const dateValue = document.getElementById(`bh_date_${entryId}`)?.value || todayStr();
+  const noteValue = document.getElementById(`bh_note_${entryId}`)?.value.trim() || "";
+  if (!noteValue) {
+    alert("Billing note cannot be empty.");
+    return;
+  }
+
+  history[index] = {
+    id: history[index].id || uid(),
+    date: dateValue,
+    note: noteValue,
+  };
+
+  try {
+    await updateDoc(doc(db, "clients", selectedClientId), {
+      billingHistory: history,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("saveClientBillingEntry:", err);
+    alert("Could not save billing entry.");
+  }
+};
+
+window.deleteClientBillingEntry = async function (entryId) {
+  if (!selectedClientId) return;
+  const client = currentClients.find((c) => c.id === selectedClientId);
+  if (!client) return;
+  if (!confirm("Delete this billing history entry?")) return;
+
+  const history = Array.isArray(client.billingHistory) ? client.billingHistory : [];
+  const next = history.filter((entry, index) => String(entry.id || ("legacy_" + index)) !== String(entryId));
+
+  try {
+    await updateDoc(doc(db, "clients", selectedClientId), {
+      billingHistory: next,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("deleteClientBillingEntry:", err);
+    alert("Could not delete billing entry.");
   }
 };
 
@@ -1491,6 +1585,157 @@ function requestStatusLabel(status) {
   return "Submitted";
 }
 
+function flowStageLabel(stage) {
+  const key = String(stage || "queued");
+  const found = CLIENT_FLOW_COLS.find((col) => col.key === key);
+  return found ? found.label : "Queued";
+}
+
+function flowStageToRequestStatus(stage) {
+  if (stage === "delivered") return "done";
+  if (stage === "building") return "scheduled";
+  return "in_review";
+}
+
+function requestTimelineMs(value) {
+  if (!value) return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value === "object" && typeof value.toDate === "function") {
+    return value.toDate().getTime();
+  }
+  if (typeof value === "object" && Number.isFinite(value.seconds)) {
+    return Number(value.seconds) * 1000;
+  }
+  return 0;
+}
+
+function formatDateTimeLabel(ms) {
+  if (!ms) return "—";
+  return new Date(ms).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function timelineKindLabel(kind) {
+  if (kind === "flow") return "Pipeline";
+  if (kind === "status") return "Status";
+  if (kind === "submitted") return "Submitted";
+  return "Update";
+}
+
+function timelineEntryDisplayText(entry) {
+  if (entry.text) return entry.text;
+  if (entry.status) return `Status changed to ${requestStatusLabel(entry.status)}.`;
+  return "Team update posted.";
+}
+
+function normalizeTimelineEntry(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  return {
+    id: String(entry.id || ""),
+    kind: String(entry.kind || entry.type || "note"),
+    status: String(entry.status || ""),
+    text: String(entry.text || entry.note || entry.message || ""),
+    visibility: String(entry.visibility || "client"),
+    actor: String(entry.actor || entry.author || "Team"),
+    createdAtMs: requestTimelineMs(entry.createdAtMs)
+      || requestTimelineMs(entry.createdAt)
+      || requestTimelineMs(entry.timestamp),
+  };
+}
+
+function buildRequestTimeline(req, includeInternal = true) {
+  const timeline = [];
+  const raw = Array.isArray(req.timeline) ? req.timeline : [];
+  raw.forEach((entry) => {
+    const normalized = normalizeTimelineEntry(entry);
+    if (!normalized) return;
+    if (!includeInternal && normalized.visibility === "internal") return;
+    timeline.push(normalized);
+  });
+
+  const submittedMs = requestTimelineMs(req.createdAt) || requestTimelineMs(req.updatedAt) || Date.now();
+  if (!timeline.some((entry) => entry.kind === "submitted")) {
+    timeline.push({
+      id: "submitted_fallback",
+      kind: "submitted",
+      status: "submitted",
+      text: "Request submitted from the client workspace.",
+      visibility: "client",
+      actor: req.clientName || "Client",
+      createdAtMs: submittedMs,
+    });
+  }
+
+  const currentStatus = String(req.status || "submitted");
+  if (!timeline.some((entry) => entry.status === currentStatus)) {
+    timeline.push({
+      id: "status_fallback",
+      kind: "status",
+      status: currentStatus,
+      text: `Current status: ${requestStatusLabel(currentStatus)}.`,
+      visibility: "client",
+      actor: "Team",
+      createdAtMs: requestTimelineMs(req.updatedAt) || submittedMs,
+    });
+  }
+
+  timeline.sort((a, b) => a.createdAtMs - b.createdAtMs);
+  return timeline;
+}
+
+function renderRequestTimelineHtml(req, includeInternal = true) {
+  const timeline = buildRequestTimeline(req, includeInternal);
+  if (!timeline.length) {
+    return `<div class="empty-state" style="padding:14px;font-size:10px">No timeline updates yet.</div>`;
+  }
+
+  return `
+    <div class="request-timeline-list">
+      ${timeline.map((entry) => {
+        const statusChip = entry.status
+          ? `<span class="req-status ${requestStatusClass(entry.status)}">${requestStatusLabel(entry.status)}</span>`
+          : `<span class="timeline-chip">${escHtml(timelineKindLabel(entry.kind))}</span>`;
+        return `
+          <div class="request-timeline-item">
+            <div class="request-timeline-head">
+              <div class="request-timeline-head-left">
+                ${statusChip}
+                <span class="request-timeline-time">${escHtml(formatDateTimeLabel(entry.createdAtMs))}</span>
+              </div>
+              <span class="timeline-chip ${entry.visibility === "internal" ? "internal" : "client"}">
+                ${entry.visibility === "internal" ? "Internal" : "Client Visible"}
+              </span>
+            </div>
+            <div class="request-timeline-text">${escHtml(timelineEntryDisplayText(entry))}</div>
+            <div class="request-timeline-meta">${escHtml(entry.actor || "Team")}</div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function makeRequestTimelineEntry({ kind = "note", status = "", text = "", visibility = "client" }) {
+  return {
+    id: uid(),
+    kind,
+    status: String(status || ""),
+    text: String(text || "").slice(0, 2000),
+    visibility: visibility === "internal" ? "internal" : "client",
+    actor: auth.currentUser?.email || "Team",
+    createdAtMs: Date.now(),
+  };
+}
+
 function renderClientRequestsAdmin(requests) {
   const body = document.getElementById("clientRequestsBody");
   if (!body) return;
@@ -1519,6 +1764,98 @@ function renderClientRequestsAdmin(requests) {
     body.appendChild(tr);
   });
 }
+
+function renderClientFlowBoard(cards) {
+  const board = document.getElementById("clientForgeBoard");
+  if (!board) return;
+  board.innerHTML = "";
+
+  CLIENT_FLOW_COLS.forEach(({ key, label }) => {
+    const columnCards = cards.filter((card) => String(card.status || "queued") === key);
+    const columnEl = document.createElement("div");
+    columnEl.className = "kanban-col client-flow-col";
+    columnEl.innerHTML = `
+      <div class="col-header">
+        <span class="col-title">${label}</span>
+        <span class="col-count">${columnCards.length}</span>
+      </div>
+      <div id="flow-col-${key}" class="kanban-dropzone"></div>
+    `;
+    board.appendChild(columnEl);
+
+    const container = columnEl.querySelector(`#flow-col-${key}`);
+    columnCards.forEach((card) => {
+      const moveButtons = CLIENT_FLOW_COLS
+        .filter((c) => c.key !== key)
+        .map((c) => `<button class="card-btn" onclick="moveClientFlowCard('${card.id}','${c.key}')">${c.label}</button>`)
+        .join("");
+
+      const cardEl = document.createElement("div");
+      cardEl.className = "card client-flow-card";
+      cardEl.innerHTML = `
+        <div class="card-title">${escHtml(card.title || "Untitled request")}</div>
+        <div class="card-company">${escHtml(card.clientName || "Unknown client")}</div>
+        <div class="card-meta">${escHtml(card.category || "general")} · ${escHtml(card.priority || "normal")}</div>
+        ${card.description ? `<div class="client-flow-note">${escHtml(card.description).slice(0, 180)}</div>` : ""}
+        <div class="card-actions">
+          ${moveButtons}
+          <button class="card-btn delete" onclick="deleteClientFlowCard('${card.id}')">✕</button>
+        </div>
+      `;
+      container.appendChild(cardEl);
+    });
+  });
+}
+
+window.moveClientFlowCard = async function (id, nextStatus) {
+  const card = currentClientFlow.find((item) => item.id === id);
+  try {
+    await updateDoc(doc(db, "client_flow", id), {
+      status: nextStatus,
+      updatedAt: serverTimestamp(),
+    });
+
+    const requestId = String(card?.requestId || "");
+    if (requestId) {
+      const mappedStatus = flowStageToRequestStatus(nextStatus);
+      const linkedRequest = currentClientRequests.find((req) => req.id === requestId);
+      const updates = {
+        updatedAt: serverTimestamp(),
+        timeline: arrayUnion(
+          makeRequestTimelineEntry({
+            kind: "flow",
+            status: mappedStatus,
+            text: `Forge Lane update: moved to ${flowStageLabel(nextStatus)}.`,
+            visibility: "client",
+          })
+        ),
+      };
+
+      if (!linkedRequest || String(linkedRequest.status || "") !== mappedStatus) {
+        updates.status = mappedStatus;
+      }
+
+      try {
+        await updateDoc(doc(db, "client_requests", requestId), updates);
+      } catch (syncErr) {
+        console.error("moveClientFlowCard request sync:", syncErr);
+      }
+    }
+  } catch (err) {
+    console.error("moveClientFlowCard:", err);
+    alert("Could not move request card.");
+  }
+};
+
+window.deleteClientFlowCard = async function (id) {
+  if (!confirm("Remove this request from Forge Lane?")) return;
+  try {
+    await deleteDoc(doc(db, "client_flow", id));
+  } catch (err) {
+    console.error("deleteClientFlowCard:", err);
+    alert("Could not delete request card.");
+  }
+};
 
 window.openRequestDetail = function (id) {
   const req = currentClientRequests.find((r) => r.id === id);
@@ -1560,16 +1897,26 @@ window.openRequestDetail = function (id) {
         </select>
       </div>
       <div class="form-group form-group-full">
+        <label class="form-label">Client Update (Visible in Client Panel)</label>
+        <textarea class="form-input form-textarea" id="rd_clientUpdate" rows="3" placeholder="Add a short progress update for this client."></textarea>
+        <div class="request-helper">Saved notes appear in the client's request timeline.</div>
+      </div>
+      <div class="form-group form-group-full">
         <label class="form-label">Internal Notes</label>
         <textarea class="form-input form-textarea" id="rd_internalNotes" rows="4">${escHtml(req.internalNotes || "")}</textarea>
+      </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Timeline & Conversation</label>
+        ${renderRequestTimelineHtml(req, true)}
       </div>
     </div>
   `;
 
   const pushBtn = document.getElementById("requestPushBtn");
   if (pushBtn) {
-    pushBtn.textContent = req.pipelineId ? "Already in Pipeline" : "Push to Pipeline";
-    pushBtn.disabled = Boolean(req.pipelineId);
+    const existingFlowId = req.clientPipelineId || req.pipelineId || "";
+    pushBtn.textContent = existingFlowId ? "Already in Forge Lane" : "Push to Forge Lane";
+    pushBtn.disabled = Boolean(existingFlowId);
   }
 
   document.getElementById("requestDetailOverlay").classList.add("open");
@@ -1582,13 +1929,50 @@ window.closeRequestDetail = function () {
 
 window.saveRequestDetail = async function () {
   if (!editingRequestId) return;
+  const req = currentClientRequests.find((item) => item.id === editingRequestId);
+  if (!req) return;
+
+  const nextPriority = document.getElementById("rd_priority").value;
+  const nextStatus = document.getElementById("rd_status").value;
+  const internalNotes = document.getElementById("rd_internalNotes").value.trim();
+  const clientUpdate = document.getElementById("rd_clientUpdate").value.trim();
+
+  const updates = {
+    priority: nextPriority,
+    status: nextStatus,
+    internalNotes,
+    updatedAt: serverTimestamp(),
+  };
+
+  const timelineEntries = [];
+  if (nextStatus !== String(req.status || "submitted")) {
+    timelineEntries.push(
+      makeRequestTimelineEntry({
+        kind: "status",
+        status: nextStatus,
+        text: `Status changed to ${requestStatusLabel(nextStatus)}.`,
+        visibility: "client",
+      })
+    );
+  }
+
+  if (clientUpdate) {
+    timelineEntries.push(
+      makeRequestTimelineEntry({
+        kind: "note",
+        status: nextStatus,
+        text: clientUpdate,
+        visibility: "client",
+      })
+    );
+  }
+
+  if (timelineEntries.length) {
+    updates.timeline = arrayUnion(...timelineEntries);
+  }
+
   try {
-    await updateDoc(doc(db, "client_requests", editingRequestId), {
-      priority: document.getElementById("rd_priority").value,
-      status: document.getElementById("rd_status").value,
-      internalNotes: document.getElementById("rd_internalNotes").value.trim(),
-      updatedAt: serverTimestamp(),
-    });
+    await updateDoc(doc(db, "client_requests", editingRequestId), updates);
     closeRequestDetail();
   } catch (err) {
     console.error("saveRequestDetail:", err);
@@ -1606,39 +1990,47 @@ function requestCategoryToService(category) {
 window.pushRequestToPipeline = async function () {
   if (!editingRequestId) return;
   const req = currentClientRequests.find((r) => r.id === editingRequestId);
-  if (!req || req.pipelineId) return;
+  const existingFlowId = req?.clientPipelineId || req?.pipelineId || "";
+  if (!req || existingFlowId) return;
   try {
-    const leadRef = await addDoc(collection(db, "pipeline"), {
+    const flowRef = await addDoc(collection(db, "client_flow"), {
+      requestId: req.id,
+      clientId: req.clientId || "",
+      clientName: req.clientName || "Unknown client",
+      clientEmail: req.clientEmail || "",
       title: `${req.clientName || "Client"} — ${req.title || "Request"}`,
-      company: req.clientName || "",
-      contact: req.clientEmail || "",
-      service: requestCategoryToService(req.category),
-      status: "leads",
-      note: [
-        "Source: client request",
-        `Category: ${req.category || "general"}`,
-        `Priority: ${req.priority || "normal"}`,
-        "",
-        req.description || "",
-      ].join("\n"),
+      requestTitle: req.title || "Request",
+      description: req.description || "",
+      category: req.category || "general",
+      priority: req.priority || "normal",
+      status: "queued",
+      source: "client-request-push",
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
 
     await updateDoc(doc(db, "client_requests", editingRequestId), {
-      pipelineId: leadRef.id,
+      clientPipelineId: flowRef.id,
       status: "in_review",
+      timeline: arrayUnion(
+        makeRequestTimelineEntry({
+          kind: "flow",
+          status: "in_review",
+          text: "Moved into Forge Lane queue for production planning.",
+          visibility: "client",
+        })
+      ),
       updatedAt: serverTimestamp(),
     });
 
     const pushBtn = document.getElementById("requestPushBtn");
     if (pushBtn) {
-      pushBtn.textContent = "Already in Pipeline";
+      pushBtn.textContent = "Already in Forge Lane";
       pushBtn.disabled = true;
     }
   } catch (err) {
     console.error("pushRequestToPipeline:", err);
-    alert("Could not push request to pipeline.");
+    alert("Could not push request to Forge Lane.");
   }
 };
 
@@ -1678,21 +2070,33 @@ function renderDecisions(decisions) {
     const el = document.createElement("div");
     el.className = "decision-entry";
 
-    const itemsHtml = (entry.items || []).map((item) => `
+    const items = Array.isArray(entry.items) ? entry.items : [];
+    const itemsHtml = items.length
+      ? items.map((item) => `
       <div class="decision-item" data-item-id="${item.id}">
         <div class="decision-item-header">
           <div class="decision-item-text-wrap">
-            <div class="decision-text">${escHtml(item.text)}</div>
-            <div class="decision-owner">${escHtml(item.owner || "")}</div>
+            <div class="decision-item-fields">
+              <input class="form-input decision-item-input" id="dec_text_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" value="${escHtmlAttr(item.text || "")}" placeholder="Decision text">
+              <input class="form-input decision-item-owner-input" id="dec_owner_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" value="${escHtmlAttr(item.owner || "")}" placeholder="Owner / action">
+            </div>
           </div>
-          <button
-            class="delete-entry-btn item-delete"
-            onclick="deleteDecisionItem('${entry.id}', '${item.id}')"
-            title="Delete this item"
-          >✕</button>
+          <div class="decision-item-actions">
+            <button
+              class="card-btn"
+              onclick="saveDecisionItem('${escHtmlAttr(entry.id)}', '${escHtmlAttr(item.id)}')"
+              title="Save this item"
+            >Save</button>
+            <button
+              class="delete-entry-btn item-delete"
+              onclick="deleteDecisionItem('${escHtmlAttr(entry.id)}', '${escHtmlAttr(item.id)}')"
+              title="Delete this item"
+            >✕</button>
+          </div>
         </div>
       </div>
-    `).join("");
+    `).join("")
+      : `<div class="empty-state" style="padding:14px;font-size:10px">No decision items yet.</div>`;
 
     el.innerHTML = `
       <div class="decision-date">
@@ -1700,12 +2104,59 @@ function renderDecisions(decisions) {
           <span class="decision-title">${escHtml(titleStr)}</span>
           ${dateStr ? `<span class="decision-date-tag">${dateStr}</span>` : ""}
         </div>
+        <button class="card-btn" onclick="addDecisionItem('${escHtmlAttr(entry.id)}')">+ Add Item</button>
       </div>
       ${itemsHtml}
     `;
     log.appendChild(el);
   });
 }
+
+window.saveDecisionItem = async function (docId, itemId) {
+  const entry = currentDecisions.find((d) => d.id === docId);
+  if (!entry) return;
+
+  const items = Array.isArray(entry.items) ? [...entry.items] : [];
+  const index = items.findIndex((item) => item.id === itemId);
+  if (index < 0) return;
+
+  const textInput = document.getElementById(`dec_text_${docId}_${itemId}`);
+  const ownerInput = document.getElementById(`dec_owner_${docId}_${itemId}`);
+  const textValue = textInput?.value.trim() || "";
+  const ownerValue = ownerInput?.value.trim() || "";
+  if (!textValue) {
+    alert("Decision text cannot be empty.");
+    return;
+  }
+
+  items[index] = {
+    ...items[index],
+    text: textValue,
+    owner: ownerValue,
+  };
+
+  try {
+    await updateDoc(doc(db, "decisions", docId), { items });
+  } catch (err) {
+    console.error("saveDecisionItem:", err);
+    alert("Could not save decision item.");
+  }
+};
+
+window.addDecisionItem = async function (docId) {
+  const entry = currentDecisions.find((d) => d.id === docId);
+  if (!entry) return;
+
+  const items = Array.isArray(entry.items) ? [...entry.items] : [];
+  items.push({ id: uid(), text: "New decision", owner: "" });
+
+  try {
+    await updateDoc(doc(db, "decisions", docId), { items });
+  } catch (err) {
+    console.error("addDecisionItem:", err);
+    alert("Could not add decision item.");
+  }
+};
 
 /**
  * Delete a single decision item from a meeting document.
@@ -2075,14 +2526,18 @@ window.saveModal = async function () {
         await upsertClientUserLink(authUid, clientRef.id, email);
       }
 
-      await upsertClientProvisionRecord(clientRef.id, {
+      const provisionSynced = await upsertClientProvisionRecord(clientRef.id, {
         companyName,
         contactName,
         email,
         authUid,
         notes,
       });
-      setElementStatus("managedProvisionStatus", "Client created and provisioning synced.", false);
+      if (provisionSynced) {
+        setElementStatus("managedProvisionStatus", "Client created and provisioning synced.", false);
+      } else {
+        setElementStatus("managedProvisionStatus", "Client created. Provisioning sync requires super admin.", false);
+      }
     }
 
     window.closeModal();

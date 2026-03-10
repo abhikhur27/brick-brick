@@ -261,6 +261,10 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    match /client_flow/{docId} {
+      allow read, write: if isAdmin();
+    }
+
     // CONTACT FORM SUBMISSIONS
     // Public visitors can create a submission.
     // Team admins can read/update/delete.
