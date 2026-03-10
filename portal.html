@@ -37,6 +37,9 @@
       <div class="nav-item active" data-page="pipeline" onclick="showPage('pipeline', this)">
         <span class="nav-icon">◈</span> Pipeline
       </div>
+      <div class="nav-item" data-page="mywork" onclick="showPage('mywork', this)">
+        <span class="nav-icon">◎</span> My Work
+      </div>
       <div class="nav-item" data-page="tasks" onclick="showPage('tasks', this)">
         <span class="nav-icon">▣</span> Tasks
       </div>
@@ -69,6 +72,7 @@
 
     <div class="top-nav">
       <div class="top-nav-item active" id="tnav-pipeline" onclick="showPage('pipeline', this, 'tnav')">◈ Pipeline</div>
+      <div class="top-nav-item" id="tnav-mywork" onclick="showPage('mywork', this, 'tnav')">◎ My Work</div>
       <div class="top-nav-item" id="tnav-tasks" onclick="showPage('tasks', this, 'tnav')">▣ Tasks</div>
       <div class="top-nav-item" id="tnav-clients" onclick="showPage('clients', this, 'tnav')">C Clients</div>
       <div class="top-nav-item" id="tnav-decisions" onclick="showPage('decisions', this, 'tnav')">◎ Decisions Log</div>
@@ -79,6 +83,36 @@
       <!-- PIPELINE PAGE -->
       <div class="page active" id="page-pipeline">
         <div class="kanban" id="kanbanBoard"></div>
+      </div>
+
+      <!-- MY WORK PAGE -->
+      <div class="page" id="page-mywork">
+        <section class="my-work-summary" id="myWorkSummary"></section>
+        <div class="my-work-grid">
+          <section class="my-work-card">
+            <div class="my-work-card-head">
+              <h3 class="tasks-section-title">My Leads</h3>
+              <span class="date-text">Assigned to you</span>
+            </div>
+            <div class="my-work-list" id="myLeadsList"></div>
+          </section>
+
+          <section class="my-work-card">
+            <div class="my-work-card-head">
+              <h3 class="tasks-section-title">My Client Requests</h3>
+              <span class="date-text">Active request ownership</span>
+            </div>
+            <div class="my-work-list" id="myRequestsList"></div>
+          </section>
+
+          <section class="my-work-card">
+            <div class="my-work-card-head">
+              <h3 class="tasks-section-title">My Tasks</h3>
+              <span class="date-text">Assigned + team tasks</span>
+            </div>
+            <div class="my-work-list" id="myTasksList"></div>
+          </section>
+        </div>
       </div>
 
       <!-- TASKS PAGE -->
@@ -143,6 +177,10 @@
       <div class="page" id="page-clients">
         <div class="clients-layout">
           <section class="clients-list-column">
+            <div class="clients-list-tools">
+              <input class="form-input clients-search-input" id="clientsSearchInput" type="text" placeholder="Search clients, contacts, email">
+              <button class="sort-pill" type="button" onclick="clearClientsSearch()">Clear</button>
+            </div>
             <div class="clients-group">
               <div class="clients-group-title">Active Recurring</div>
               <div class="clients-list" id="clientsActiveList"></div>

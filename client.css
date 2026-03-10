@@ -580,6 +580,45 @@ body::before {
   margin-top: 12px;
 }
 
+.timeline-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.timeline-toolbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline-order-hint {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--silver-dim);
+}
+
+.timeline-shell {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(255,255,255,0.02);
+  max-height: 340px;
+  overflow: auto;
+}
+
+.timeline-shell.collapsed {
+  max-height: 0;
+  overflow: hidden;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-width: 0;
+}
+
 .client-detail-description {
   border: 1px solid var(--border);
   border-radius: 8px;

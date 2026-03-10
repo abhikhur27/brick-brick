@@ -40,6 +40,9 @@ const LEAD_SERVICE_OPTIONS = [
   { value: "Brand / Creative", tagClass: "tag-brand" },
 ];
 
+const TEAM_ASSIGNMENT_UID = "__team__";
+const OTHER_ASSIGNMENT_UID = "__other__";
+
 // ─── STATE CACHES (updated by real-time listeners) ───────────────────────────
 let currentPipeline  = [];
 let currentTasks     = [];
@@ -52,6 +55,16 @@ let currentManagedUsers = [];
 let currentProvisioning = [];
 let managedRecordsByKey = new Map();
 let showArchivedRequests = false;
+let showArchivedMyWorkRequests = false;
+let showCompletedMyTasks = false;
+let clientsSearchTerm = "";
+const LEADS_VISIBLE_LIMIT = 10;
+const TASK_STALE_DAYS = 7;
+let showAllLeads = false;
+let teamTimelineExpanded = true;
+let collapsedPipelineCols = new Set();
+let hasTaskBackfillRun = false;
+let isTaskBackfillRunning = false;
 
 // ─── TASK SORT STATE ─────────────────────────────────────────────────────────
 let taskSortField = "due";     // "due" | "createdAt" | "priority" | "owner" | "done"
@@ -115,6 +128,10 @@ document.getElementById("managedProvisionRole")?.addEventListener("change", togg
 document.getElementById("managedUserOverlay")?.addEventListener("click", function (e) {
   if (e.target === this) window.closeManagedUserModal();
 });
+document.getElementById("clientsSearchInput")?.addEventListener("input", function (e) {
+  clientsSearchTerm = String(e.target?.value || "").trim().toLowerCase();
+  renderClientsWorkspace(currentClients);
+});
 
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
@@ -126,6 +143,84 @@ function isTeamRole(role) {
 
 function isSuperAdminRole(role) {
   return role === "super_admin";
+}
+
+function isTeamAssignmentUid(uid) {
+  return String(uid || "") === TEAM_ASSIGNMENT_UID;
+}
+
+function isOtherAssignmentUid(uid) {
+  return String(uid || "") === OTHER_ASSIGNMENT_UID;
+}
+
+function findTeamUserByLooseLabel(label) {
+  const needle = String(label || "").trim().toLowerCase();
+  if (!needle) return null;
+  return currentTeamUsers.find((user) => {
+    const uid = String(user.id || "").toLowerCase();
+    const name = String(user.name || "").trim().toLowerCase();
+    const email = normalizeEmail(user.email);
+    return needle === uid || needle === name || needle === email;
+  }) || null;
+}
+
+function normalizeTaskOwnerFields(task = {}) {
+  const rawUid = String(task.ownerUid || "");
+  const rawOwnerName = String(task.ownerName || "");
+  const rawOwner = String(task.owner || rawOwnerName || "").trim();
+  const rawOwnerType = String(task.ownerType || "");
+
+  if (isTeamAssignmentUid(rawUid) || rawOwnerType === "team") {
+    return {
+      ownerUid: TEAM_ASSIGNMENT_UID,
+      ownerName: "Entire Team",
+      ownerType: "team",
+      owner: "Entire Team",
+    };
+  }
+
+  if (rawUid) {
+    const resolved = resolveTeamUserName(rawUid, rawOwnerName || rawOwner);
+    return {
+      ownerUid: rawUid,
+      ownerName: resolved,
+      ownerType: "user",
+      owner: resolved,
+    };
+  }
+
+  const legacyLower = rawOwner.toLowerCase();
+  if (!rawOwner || legacyLower === "team" || legacyLower === "entire team" || legacyLower === "all team") {
+    return {
+      ownerUid: TEAM_ASSIGNMENT_UID,
+      ownerName: "Entire Team",
+      ownerType: "team",
+      owner: "Entire Team",
+    };
+  }
+
+  const matchedTeamUser = findTeamUserByLooseLabel(rawOwner);
+  if (matchedTeamUser) {
+    const label = teamUserLabel(matchedTeamUser);
+    return {
+      ownerUid: String(matchedTeamUser.id || ""),
+      ownerName: label,
+      ownerType: "user",
+      owner: label,
+    };
+  }
+
+  return {
+    ownerUid: "",
+    ownerName: rawOwner,
+    ownerType: "other",
+    owner: rawOwner,
+  };
+}
+
+function taskOwnerDisplayName(task = {}) {
+  const normalized = normalizeTaskOwnerFields(task);
+  return normalized.ownerName || normalized.owner || "Entire Team";
 }
 
 function toggleAccessManagerVisibility(show) {
@@ -204,6 +299,13 @@ onAuthStateChanged(auth, async (user) => {
     currentClientRequests = [];
     currentTeamUsers = [];
     showArchivedRequests = false;
+    showArchivedMyWorkRequests = false;
+    showCompletedMyTasks = false;
+    showAllLeads = false;
+    teamTimelineExpanded = true;
+    clientsSearchTerm = "";
+    hasTaskBackfillRun = false;
+    isTaskBackfillRunning = false;
     currentManagedUsers = [];
     currentProvisioning = [];
     managedRecordsByKey = new Map();
@@ -216,6 +318,8 @@ onAuthStateChanged(auth, async (user) => {
       btn.textContent = "ENTER WORKSPACE";
       btn.disabled = false;
     }
+    const searchEl = document.getElementById("clientsSearchInput");
+    if (searchEl) searchEl.value = "";
     return;
   }
 
@@ -265,6 +369,7 @@ function startListeners() {
     (snap) => {
       currentPipeline = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderPipeline(currentPipeline);
+      renderMyWorkDashboard();
     },
     (err) => console.error("Pipeline error:", err)
   );
@@ -275,6 +380,8 @@ function startListeners() {
     (snap) => {
       currentTasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderTasks(currentTasks);
+      renderMyWorkDashboard();
+      backfillTaskAssignments(currentTasks);
     },
     (err) => console.error("Tasks error:", err)
   );
@@ -317,6 +424,7 @@ function startListeners() {
     (snap) => {
       currentClientRequests = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderClientRequestsAdmin(currentClientRequests);
+      renderMyWorkDashboard();
     },
     (err) => console.error("Client requests error:", err)
   );
@@ -360,10 +468,15 @@ function startTeamUserListener() {
           const bn = String(b.name || b.email || "").toLowerCase();
           return an.localeCompare(bn);
         });
+      renderPipeline(currentPipeline);
+      renderClientRequestsAdmin(currentClientRequests);
+      renderMyWorkDashboard();
+      backfillTaskAssignments(currentTasks);
     },
     (err) => {
       console.error("Team users listener error:", err);
       currentTeamUsers = [];
+      renderMyWorkDashboard();
     }
   );
 }
@@ -372,6 +485,7 @@ function stopTeamUserListener() {
   if (unsubTeamUsers) unsubTeamUsers();
   unsubTeamUsers = null;
   currentTeamUsers = [];
+  renderMyWorkDashboard();
 }
 
 function stopRealtimeListeners() {
@@ -486,15 +600,27 @@ function teamUserInitials(name) {
 function resolveTeamUserName(uid, fallbackName = "") {
   const normalizedUid = String(uid || "");
   if (!normalizedUid) return "";
+  if (isTeamAssignmentUid(normalizedUid)) return "Entire Team";
   const found = currentTeamUsers.find((user) => user.id === normalizedUid);
   if (found) return teamUserLabel(found);
   return String(fallbackName || normalizedUid.slice(0, 8));
 }
 
-function teamAssigneeOptionsHtml(selectedUid = "", fallbackName = "") {
+function teamAssigneeOptionsHtml(selectedUid = "", fallbackName = "", options = {}) {
   const normalizedSelected = String(selectedUid || "");
-  const options = [`<option value="">Unassigned</option>`];
+  const includeUnassigned = options.includeUnassigned !== false;
+  const includeTeam = options.includeTeam !== false;
+  const selectOptions = [];
   const seen = new Set();
+  if (includeUnassigned) {
+    selectOptions.push(`<option value="">Unassigned</option>`);
+  }
+  if (includeTeam) {
+    selectOptions.push(
+      `<option value="${TEAM_ASSIGNMENT_UID}" ${normalizedSelected === TEAM_ASSIGNMENT_UID ? "selected" : ""}>Entire Team</option>`
+    );
+    seen.add(TEAM_ASSIGNMENT_UID);
+  }
   const users = currentTeamUsers.length
     ? currentTeamUsers
     : (auth.currentUser?.uid
@@ -509,17 +635,77 @@ function teamAssigneeOptionsHtml(selectedUid = "", fallbackName = "") {
     const uid = String(user.id || "");
     if (!uid) return;
     seen.add(uid);
-    options.push(
+    selectOptions.push(
       `<option value="${escHtmlAttr(uid)}" ${uid === normalizedSelected ? "selected" : ""}>${escHtml(teamUserLabel(user))}</option>`
     );
   });
 
   if (normalizedSelected && !seen.has(normalizedSelected)) {
     const fallback = resolveTeamUserName(normalizedSelected, fallbackName);
-    options.push(`<option value="${escHtmlAttr(normalizedSelected)}" selected>${escHtml(fallback)}</option>`);
+    selectOptions.push(`<option value="${escHtmlAttr(normalizedSelected)}" selected>${escHtml(fallback)}</option>`);
   }
 
-  return options.join("");
+  return selectOptions.join("");
+}
+
+function taskOwnerSelectValue(task = {}) {
+  const normalized = normalizeTaskOwnerFields(task);
+  if (isTeamAssignmentUid(normalized.ownerUid)) return TEAM_ASSIGNMENT_UID;
+  if (normalized.ownerUid) return normalized.ownerUid;
+  if (normalized.ownerType === "other") return OTHER_ASSIGNMENT_UID;
+  return TEAM_ASSIGNMENT_UID;
+}
+
+function taskAssigneeOptionsHtml(task = {}) {
+  const selected = taskOwnerSelectValue(task);
+  const baseOptions = teamAssigneeOptionsHtml(
+    selected,
+    taskOwnerDisplayName(task),
+    { includeUnassigned: false, includeTeam: true }
+  );
+  return `${baseOptions}<option value="${OTHER_ASSIGNMENT_UID}" ${selected === OTHER_ASSIGNMENT_UID ? "selected" : ""}>Other (custom)</option>`;
+}
+
+function syncTaskOwnerOtherField(selectId, wrapId, inputId) {
+  const selectEl = document.getElementById(selectId);
+  const wrapEl = document.getElementById(wrapId);
+  const inputEl = document.getElementById(inputId);
+  if (!selectEl || !wrapEl || !inputEl) return;
+  const show = selectEl.value === OTHER_ASSIGNMENT_UID;
+  wrapEl.style.display = show ? "block" : "none";
+  inputEl.required = show;
+  if (!show) inputEl.value = "";
+}
+
+function resolveTaskOwnerFromInputs(selectId, otherInputId) {
+  const selected = String(document.getElementById(selectId)?.value || TEAM_ASSIGNMENT_UID);
+  if (selected === TEAM_ASSIGNMENT_UID || !selected) {
+    return {
+      ownerUid: TEAM_ASSIGNMENT_UID,
+      ownerName: "Entire Team",
+      ownerType: "team",
+      owner: "Entire Team",
+    };
+  }
+  if (selected === OTHER_ASSIGNMENT_UID) {
+    const custom = String(document.getElementById(otherInputId)?.value || "").trim();
+    if (!custom) {
+      return null;
+    }
+    return {
+      ownerUid: "",
+      ownerName: custom,
+      ownerType: "other",
+      owner: custom,
+    };
+  }
+  const resolved = resolveTeamUserName(selected, "");
+  return {
+    ownerUid: selected,
+    ownerName: resolved,
+    ownerType: "user",
+    owner: resolved,
+  };
 }
 
 function assigneeChipHtml(uid, fallbackName = "", emptyLabel = "Unassigned") {
@@ -535,6 +721,220 @@ function assigneeChipHtml(uid, fallbackName = "", emptyLabel = "Unassigned") {
   `;
 }
 
+function pipelineStatusLabel(status) {
+  const found = COLS.find((col) => col.key === String(status || ""));
+  return found ? found.label : "Lead";
+}
+
+function renderMyWorkDashboard() {
+  const summaryEl = document.getElementById("myWorkSummary");
+  const leadsEl = document.getElementById("myLeadsList");
+  const requestsEl = document.getElementById("myRequestsList");
+  const tasksEl = document.getElementById("myTasksList");
+  if (!summaryEl || !leadsEl || !requestsEl || !tasksEl) return;
+
+  const currentUid = String(auth.currentUser?.uid || "");
+  if (!currentUid) {
+    summaryEl.innerHTML = "";
+    leadsEl.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">Sign in to view your ownership dashboard.</div>`;
+    requestsEl.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">Sign in to view your ownership dashboard.</div>`;
+    tasksEl.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">Sign in to view your ownership dashboard.</div>`;
+    return;
+  }
+
+  const myLeads = currentPipeline
+    .filter((card) => {
+      const ownerUid = String(card.ownerUid || "");
+      return ownerUid === currentUid || isTeamAssignmentUid(ownerUid);
+    })
+    .sort((a, b) => {
+      const ams = requestTimelineMs(a.updatedAt) || requestTimelineMs(a.createdAt);
+      const bms = requestTimelineMs(b.updatedAt) || requestTimelineMs(b.createdAt);
+      return bms - ams;
+    });
+
+  const myRequests = currentClientRequests
+    .filter((req) => {
+      const ownerUid = String(req.ownerUid || "");
+      return ownerUid === currentUid || isTeamAssignmentUid(ownerUid);
+    })
+    .sort((a, b) => {
+      const ams = requestTimelineMs(a.updatedAt) || requestTimelineMs(a.createdAt);
+      const bms = requestTimelineMs(b.updatedAt) || requestTimelineMs(b.createdAt);
+      return bms - ams;
+    });
+  const activeMyRequests = myRequests.filter((req) => req.archived !== true);
+  const archivedMyRequests = myRequests.filter((req) => req.archived === true);
+  const visibleMyRequests = showArchivedMyWorkRequests ? myRequests : activeMyRequests;
+  const me = currentTeamUsers.find((user) => String(user.id || "") === currentUid);
+  const meLabel = String(me?.name || auth.currentUser?.displayName || "").trim().toLowerCase();
+  const meEmail = normalizeEmail(me?.email || auth.currentUser?.email || "");
+
+  const allMyTasks = currentTasks
+    .filter((task) => {
+      const normalized = normalizeTaskOwnerFields(task);
+      if (isTeamAssignmentUid(normalized.ownerUid)) return true;
+      if (normalized.ownerUid) return normalized.ownerUid === currentUid;
+      const ownerLower = String(normalized.ownerName || normalized.owner || "").trim().toLowerCase();
+      return ownerLower && (ownerLower === meLabel || ownerLower === meEmail);
+    })
+    .sort((a, b) => {
+      if (Boolean(a.done) !== Boolean(b.done)) return a.done ? 1 : -1;
+      const adue = a.due || "9999-99-99";
+      const bdue = b.due || "9999-99-99";
+      if (adue !== bdue) return adue.localeCompare(bdue);
+      const ams = requestTimelineMs(a.updatedAt) || requestTimelineMs(a.createdAt);
+      const bms = requestTimelineMs(b.updatedAt) || requestTimelineMs(b.createdAt);
+      return bms - ams;
+    });
+  const openMyTasks = allMyTasks.filter((task) => !task.done);
+  const completedMyTasks = allMyTasks.filter((task) => task.done);
+  const visibleMyTasks = showCompletedMyTasks ? allMyTasks : openMyTasks;
+
+  const leadsNeedingFollowUp = myLeads.filter((card) => String(card.status || "") === "leads").length;
+  const highPriorityRequests = activeMyRequests.filter((req) => String(req.priority || "normal") === "high").length;
+  summaryEl.innerHTML = `
+    <div class="my-work-pill">My Leads: <strong>${myLeads.length}</strong></div>
+    <div class="my-work-pill">Need follow-up: <strong>${leadsNeedingFollowUp}</strong></div>
+    <div class="my-work-pill">My Requests (Active): <strong>${activeMyRequests.length}</strong></div>
+    <div class="my-work-pill">My Requests (Archived): <strong>${archivedMyRequests.length}</strong></div>
+    <div class="my-work-pill">My Tasks (Open): <strong>${openMyTasks.length}</strong></div>
+    <div class="my-work-pill">High Priority: <strong>${highPriorityRequests}</strong></div>
+  `;
+
+  if (!myLeads.length) {
+    leadsEl.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">No assigned leads yet.</div>`;
+  } else {
+    leadsEl.innerHTML = myLeads.map((card) => {
+      const statusLabel = pipelineStatusLabel(card.status);
+      const tagClass = leadServiceTagClass(card.service);
+      const updatedMs = requestTimelineMs(card.updatedAt) || requestTimelineMs(card.createdAt);
+      return `
+        <button class="my-work-item" type="button" onclick="openLeadDetail('${escHtmlAttr(card.id)}')">
+          <div class="my-work-item-row">
+            <span class="my-work-item-title">${escHtml(card.title || "Untitled lead")}</span>
+            <span class="timeline-chip">${escHtml(statusLabel)}</span>
+          </div>
+          <div class="my-work-item-row">
+            <span class="card-tag ${tagClass}">${escHtml(card.service || "Service")}</span>
+            <span class="date-text">${escHtml(formatDateTimeLabel(updatedMs))}</span>
+          </div>
+          ${card.note ? `<div class="my-work-item-copy">${escHtml(card.note).slice(0, 160)}</div>` : ""}
+        </button>
+      `;
+    }).join("");
+  }
+
+  const archivedToggleLabel = showArchivedMyWorkRequests
+    ? "Hide Archived"
+    : `Show Archived (${archivedMyRequests.length})`;
+  const requestsTools = `
+    <div class="my-work-inline-tools">
+      <span class="date-text">${showArchivedMyWorkRequests ? "Showing active + archived assignments" : "Showing active assignments only"}</span>
+      <button class="sort-pill${showArchivedMyWorkRequests ? " active" : ""}" type="button" onclick="toggleMyWorkArchivedRequests()" ${archivedMyRequests.length ? "" : "disabled"}>
+        ${archivedToggleLabel}
+      </button>
+    </div>
+  `;
+
+  if (!visibleMyRequests.length) {
+    const emptyMessage = showArchivedMyWorkRequests
+      ? "No assigned client requests yet."
+      : "No active assigned requests. Use archived toggle to review completed work.";
+    requestsEl.innerHTML = `${requestsTools}<div class="empty-state" style="padding:14px;font-size:10px">${emptyMessage}</div>`;
+  } else {
+    requestsEl.innerHTML = requestsTools + visibleMyRequests.map((req) => {
+      const status = String(req.status || "submitted");
+      const updatedMs = requestTimelineMs(req.updatedAt) || requestTimelineMs(req.createdAt);
+      const archivedBadge = req.archived === true
+        ? `<span class="timeline-chip internal">Archived</span>`
+        : "";
+      return `
+        <button class="my-work-item" type="button" onclick="openRequestDetail('${escHtmlAttr(req.id)}')">
+          <div class="my-work-item-row">
+            <span class="my-work-item-title">${escHtml(req.title || "Untitled request")}</span>
+            <span>
+              <span class="req-status ${requestStatusClass(status)}">${escHtml(requestStatusLabel(status))}</span>
+              ${archivedBadge}
+            </span>
+          </div>
+          <div class="my-work-item-row">
+            <span class="date-text">${escHtml(req.clientName || "Unknown client")}</span>
+            <span class="date-text">${escHtml(formatDateTimeLabel(updatedMs))}</span>
+          </div>
+          <div class="my-work-item-copy">${escHtml(req.category || "general")} - ${escHtml(req.priority || "normal")}</div>
+        </button>
+      `;
+    }).join("");
+  }
+
+  const completedToggleLabel = showCompletedMyTasks
+    ? "Open Only"
+    : `Include Completed (${completedMyTasks.length})`;
+  const tasksTools = `
+    <div class="my-work-inline-tools">
+      <span class="date-text">${showCompletedMyTasks ? "Showing open + completed assignments" : "Showing open assignments only"}</span>
+      <button class="sort-pill${showCompletedMyTasks ? " active" : ""}" type="button" onclick="toggleMyWorkCompletedTasks()" ${(completedMyTasks.length || showCompletedMyTasks) ? "" : "disabled"}>
+        ${completedToggleLabel}
+      </button>
+    </div>
+  `;
+
+  if (!allMyTasks.length) {
+    tasksEl.innerHTML = `${tasksTools}<div class="empty-state" style="padding:14px;font-size:10px">No assigned tasks yet.</div>`;
+  } else if (!visibleMyTasks.length) {
+    tasksEl.innerHTML = `${tasksTools}<div class="empty-state" style="padding:14px;font-size:10px">No open assigned tasks. Use the completed toggle to review finished work.</div>`;
+  } else {
+    tasksEl.innerHTML = tasksTools + visibleMyTasks.map((task) => {
+      const owner = normalizeTaskOwnerFields(task);
+      const dueLabel = task.due ? formatDate(task.due) : "No due date";
+      const priority = String(task.priority || "Mid");
+      const pClass = priority === "High" ? "p-high" : priority === "Mid" ? "p-mid" : "p-low";
+      const updatedLabel = formatDateTimeLabel(taskUpdatedMs(task));
+      const stale = isTaskStale(task);
+      const sharedBadge = isTeamAssignmentUid(owner.ownerUid)
+        ? `<span class="timeline-chip client">Team Shared</span>`
+        : "";
+      const staleBadge = stale ? `<span class="timeline-chip internal">Stale</span>` : "";
+      const doneToggleTitle = task.done ? "Mark open" : "Mark completed";
+      return `
+        <button class="my-work-item${task.done ? " is-done" : ""}${stale ? " is-stale" : ""}" type="button" onclick="openTaskDetail('${escHtmlAttr(task.id)}')">
+          <div class="my-work-item-row">
+            <span class="my-work-item-title">${escHtml(task.name || "Untitled task")}</span>
+            <span>
+              <span class="checkbox ${task.done ? "checked" : ""} my-work-task-check" onclick="toggleMyWorkTaskDone(event, '${escHtmlAttr(task.id)}', ${!task.done})" title="${doneToggleTitle}"></span>
+              ${sharedBadge}
+              ${staleBadge}
+              <span class="timeline-chip ${task.done ? "internal" : "client"}">${task.done ? "Completed" : "Open"}</span>
+            </span>
+          </div>
+          <div class="my-work-item-row">
+            <span class="owner-chip"><span class="avatar">${escHtml(teamUserInitials(owner.ownerName || owner.owner || "Team"))}</span>${escHtml(owner.ownerName || owner.owner || "Entire Team")}</span>
+            <span class="priority ${pClass}">${escHtml(priority)}</span>
+          </div>
+          <div class="my-work-item-copy">Due: ${escHtml(dueLabel)} | Updated: ${escHtml(updatedLabel)}</div>
+        </button>
+      `;
+    }).join("");
+  }
+}
+
+window.toggleMyWorkArchivedRequests = function () {
+  showArchivedMyWorkRequests = !showArchivedMyWorkRequests;
+  renderMyWorkDashboard();
+};
+
+window.toggleMyWorkCompletedTasks = function () {
+  showCompletedMyTasks = !showCompletedMyTasks;
+  renderMyWorkDashboard();
+};
+
+window.toggleMyWorkTaskDone = async function (evt, id, newDone) {
+  if (evt?.stopPropagation) evt.stopPropagation();
+  if (evt?.preventDefault) evt.preventDefault();
+  await toggleTask(id, newDone);
+};
+
 // ─── PIPELINE RENDER ──────────────────────────────────────────────────────────
 function renderPipeline(cards) {
   const board = document.getElementById("kanbanBoard");
@@ -542,20 +942,58 @@ function renderPipeline(cards) {
   board.innerHTML = "";
 
   COLS.forEach(({ key, label }) => {
-    const colCards = cards.filter((c) => c.status === key);
+    let colCards = cards.filter((c) => c.status === key);
+    if (key === "leads") {
+      colCards = [...colCards].sort((a, b) => {
+        const ams = requestTimelineMs(a.createdAt) || requestTimelineMs(a.updatedAt);
+        const bms = requestTimelineMs(b.createdAt) || requestTimelineMs(b.updatedAt);
+        return ams - bms;
+      });
+    }
+
+    const isCollapsed = collapsedPipelineCols.has(key);
+    const shouldLimitLeads =
+      key === "leads"
+      && !showAllLeads
+      && colCards.length > LEADS_VISIBLE_LIMIT;
+    const visibleCards = shouldLimitLeads ? colCards.slice(0, LEADS_VISIBLE_LIMIT) : colCards;
+    const hiddenLeadCount = shouldLimitLeads ? colCards.length - visibleCards.length : 0;
+
     const colEl    = document.createElement("div");
-    colEl.className = "kanban-col";
+    colEl.className = `kanban-col${isCollapsed ? " is-collapsed" : ""}`;
     colEl.innerHTML = `
       <div class="col-header">
-        <span class="col-title">${label}</span>
-        <span class="col-count">${colCards.length}</span>
+        <div class="col-header-left">
+          <span class="col-title">${label}</span>
+          ${key === "leads" ? `<span class="col-mode-pill">FIFO</span>` : ""}
+        </div>
+        <div class="col-header-right">
+          <span class="col-count">${colCards.length}</span>
+          <button class="col-toggle-btn" type="button" onclick="togglePipelineColumnCollapse('${key}')">
+            ${isCollapsed ? "Expand" : "Collapse"}
+          </button>
+        </div>
       </div>
-      <div id="col-${key}" class="kanban-dropzone"></div>
+      ${
+        key === "leads" && hiddenLeadCount > 0
+          ? `<div class="kanban-note">Showing first ${LEADS_VISIBLE_LIMIT} oldest leads. ${hiddenLeadCount} hidden.</div>`
+          : ""
+      }
+      <div id="col-${key}" class="kanban-dropzone${isCollapsed ? " is-collapsed" : ""}"></div>
+      ${
+        key === "leads" && colCards.length > LEADS_VISIBLE_LIMIT
+          ? `<button class="card-btn leads-visible-toggle" type="button" onclick="toggleLeadOverflow()">
+               ${showAllLeads ? `Show top ${LEADS_VISIBLE_LIMIT} (FIFO)` : `Show all (${colCards.length})`}
+             </button>`
+          : ""
+      }
       <button class="add-card" onclick="openAddModal('pipeline','${key}')">+ Add</button>
     `;
     board.appendChild(colEl);
 
     const container = colEl.querySelector(`#col-${key}`);
+    if (!container || isCollapsed) return;
+
     container.addEventListener("dragover", (e) => {
       e.preventDefault();
       container.classList.add("is-drop-target");
@@ -576,7 +1014,7 @@ function renderPipeline(cards) {
       await moveCard(cardId, key);
     });
 
-    colCards.forEach((card) => {
+    visibleCards.forEach((card) => {
       const tagClass = leadServiceTagClass(card.service);
       const ownerChip = (card.ownerUid || card.ownerName)
         ? `<div class="pipeline-owner">${assigneeChipHtml(card.ownerUid, card.ownerName)}</div>`
@@ -731,7 +1169,9 @@ window.saveLeadDetail = async function () {
     return;
   }
   const ownerUid = String(document.getElementById("ld_ownerUid").value || "");
-  const ownerName = ownerUid ? resolveTeamUserName(ownerUid, "") : "";
+  const ownerName = isTeamAssignmentUid(ownerUid)
+    ? "Entire Team"
+    : (ownerUid ? resolveTeamUserName(ownerUid, "") : "");
   try {
     await updateDoc(doc(db, "pipeline", editingLeadId), {
       title:     document.getElementById("ld_title").value.trim(),
@@ -764,6 +1204,53 @@ document.getElementById("leadDetailOverlay")?.addEventListener("click", function
 // Priority sort order helper
 const PRIORITY_ORDER = { High: 0, Mid: 1, Low: 2 };
 
+async function backfillTaskAssignments(tasks) {
+  if (hasTaskBackfillRun || isTaskBackfillRunning || !Array.isArray(tasks)) return;
+  if (!currentTeamUsers.length) return;
+
+  const needsBackfill = tasks.filter((task) =>
+    !Object.prototype.hasOwnProperty.call(task, "ownerUid")
+    || !Object.prototype.hasOwnProperty.call(task, "ownerName")
+    || !Object.prototype.hasOwnProperty.call(task, "ownerType")
+  );
+
+  if (!needsBackfill.length) {
+    hasTaskBackfillRun = true;
+    return;
+  }
+
+  isTaskBackfillRunning = true;
+  try {
+    for (const task of needsBackfill) {
+      const normalized = normalizeTaskOwnerFields(task);
+      await updateDoc(doc(db, "tasks", task.id), {
+        ownerUid: normalized.ownerUid,
+        ownerName: normalized.ownerName,
+        ownerType: normalized.ownerType,
+        owner: normalized.owner,
+        updatedAt: serverTimestamp(),
+      });
+    }
+    hasTaskBackfillRun = true;
+  } catch (err) {
+    console.error("backfillTaskAssignments:", err);
+  } finally {
+    isTaskBackfillRunning = false;
+  }
+}
+
+function taskUpdatedMs(task) {
+  return requestTimelineMs(task?.updatedAt) || requestTimelineMs(task?.createdAt);
+}
+
+function isTaskStale(task) {
+  if (!task || task.done) return false;
+  const updatedMs = taskUpdatedMs(task);
+  if (!updatedMs) return false;
+  const staleCutoffMs = Date.now() - (TASK_STALE_DAYS * 24 * 60 * 60 * 1000);
+  return updatedMs < staleCutoffMs;
+}
+
 function sortedTasks(tasks) {
   const arr = [...tasks];
   arr.sort((a, b) => {
@@ -782,8 +1269,8 @@ function sortedTasks(tasks) {
         vb = PRIORITY_ORDER[b.priority] ?? 9;
         break;
       case "owner":
-        va = (a.owner || "").toLowerCase();
-        vb = (b.owner || "").toLowerCase();
+        va = taskOwnerDisplayName(a).toLowerCase();
+        vb = taskOwnerDisplayName(b).toLowerCase();
         break;
       case "done":
         va = a.done ? 1 : 0;
@@ -824,32 +1311,51 @@ function renderTasks(tasks) {
 
     const isOverdue = !task.done && task.due && task.due < todayStr();
     if (isOverdue) tr.classList.add("task-overdue-row");
-    const pClass    = task.priority === "High" ? "p-high" : task.priority === "Mid" ? "p-mid" : "p-low";
-    const initials  = (task.owner || "?").split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
+
+    const stale = isTaskStale(task);
+    if (stale) tr.classList.add("task-stale-row");
+
+    const pClass = task.priority === "High" ? "p-high" : task.priority === "Mid" ? "p-mid" : "p-low";
+    const normalizedOwner = normalizeTaskOwnerFields(task);
+    const ownerLabel = taskOwnerDisplayName(task) || "Entire Team";
+    const initials = ownerLabel.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
+
+    const ownerKind = isTeamAssignmentUid(normalizedOwner.ownerUid)
+      ? "team"
+      : (normalizedOwner.ownerUid ? "personal" : "custom");
+    const ownerKindLabel = ownerKind === "team"
+      ? "Team Shared"
+      : (ownerKind === "personal" ? "Personal" : "Custom");
 
     const addedStr = task.createdAt?.toDate
       ? task.createdAt.toDate().toLocaleDateString("en-US", { month: "short", day: "numeric" })
-      : "—";
+      : "-";
+
+    const staleBadge = stale
+      ? `<span class="task-stale-flag" title="No task activity for ${TASK_STALE_DAYS}+ days">Stale</span>`
+      : "";
 
     tr.innerHTML = `
       <td><div class="checkbox ${task.done ? "checked" : ""}" onclick="toggleTask('${task.id}', ${!task.done})"></div></td>
-      <td class="task-name">${escHtml(task.name)}</td>
+      <td class="task-name-cell"><span class="task-name">${escHtml(task.name)}</span>${staleBadge}</td>
       <td>
-        <span class="owner-chip">
+        <span class="owner-chip owner-chip-${ownerKind}">
           <span class="avatar">${initials}</span>
-          ${escHtml(task.owner || "Team")}
+          ${escHtml(ownerLabel)}
         </span>
+        <span class="task-owner-kind kind-${ownerKind}">${ownerKindLabel}</span>
       </td>
       <td><span class="date-text ${isOverdue ? "date-overdue" : ""}">${formatDate(task.due)}</span></td>
       <td><span class="date-text">${addedStr}</span></td>
-      <td><span class="priority ${pClass}">${task.priority || "—"}</span></td>
+      <td><span class="priority ${pClass}">${task.priority || "-"}</span></td>
       <td>
         <div class="task-actions">
           <button class="card-btn" onclick="openTaskDetail('${task.id}')">Edit</button>
-          <button class="card-btn delete" onclick="deleteTask('${task.id}')">✕</button>
+          <button class="card-btn delete" onclick="deleteTask('${task.id}')">&times;</button>
         </div>
       </td>
     `;
+
     if (task.done) {
       completedCount++;
       completedBody.appendChild(tr);
@@ -871,7 +1377,7 @@ window.setSort = function (field, btnEl) {
   } else {
     taskSortField = field;
     taskSortAsc   = true;
-    document.querySelectorAll(".sort-pill").forEach((p) => p.classList.remove("active"));
+    document.querySelectorAll(".sort-pill[data-sort]").forEach((p) => p.classList.remove("active"));
     btnEl.classList.add("active");
   }
   const dirBtn = document.getElementById("sortDirBtn");
@@ -887,7 +1393,12 @@ window.toggleSortDir = function () {
 };
 
 window.toggleTask = async function (id, newDone) {
-  try { await updateDoc(doc(db, "tasks", id), { done: newDone }); }
+  try {
+    await updateDoc(doc(db, "tasks", id), {
+      done: newDone,
+      updatedAt: serverTimestamp(),
+    });
+  }
   catch (err) { console.error("toggleTask:", err); }
 };
 
@@ -906,6 +1417,12 @@ window.openTaskDetail = function (id) {
   const addedStr = task.createdAt?.toDate
     ? task.createdAt.toDate().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
     : "—";
+  const selectedOwner = taskOwnerSelectValue(task);
+  const normalizedOwner = normalizeTaskOwnerFields(task);
+  const customOwnerValue = selectedOwner === OTHER_ASSIGNMENT_UID
+    ? String(normalizedOwner.ownerName || normalizedOwner.owner || "")
+    : "";
+  const ownerOptions = taskAssigneeOptionsHtml(task);
 
   document.getElementById("taskDetailBody").innerHTML = `
     <div class="detail-grid">
@@ -914,8 +1431,14 @@ window.openTaskDetail = function (id) {
         <input class="form-input" id="td_name" value="${escHtmlAttr(task.name || "")}" placeholder="What needs to get done?">
       </div>
       <div class="form-group">
-        <label class="form-label">Owner</label>
-        <input class="form-input" id="td_owner" value="${escHtmlAttr(task.owner || "")}" placeholder="Athan / Team / etc.">
+        <label class="form-label">Assigned To</label>
+        <select class="form-select" id="td_ownerUid">
+          ${ownerOptions}
+        </select>
+      </div>
+      <div class="form-group" id="td_ownerOtherWrap" style="${selectedOwner === OTHER_ASSIGNMENT_UID ? "" : "display:none"}">
+        <label class="form-label">Other Assignee</label>
+        <input class="form-input" id="td_ownerOther" value="${escHtmlAttr(customOwnerValue)}" placeholder="Type custom assignee">
       </div>
       <div class="form-group">
         <label class="form-label">Due Date</label>
@@ -942,6 +1465,10 @@ window.openTaskDetail = function (id) {
       </div>
     </div>
   `;
+  document.getElementById("td_ownerUid")?.addEventListener("change", () => {
+    syncTaskOwnerOtherField("td_ownerUid", "td_ownerOtherWrap", "td_ownerOther");
+  });
+  syncTaskOwnerOtherField("td_ownerUid", "td_ownerOtherWrap", "td_ownerOther");
 
   const delBtn = document.getElementById("taskDetailDeleteBtn");
   delBtn.onclick = async () => {
@@ -957,11 +1484,19 @@ window.saveTaskDetail = async function () {
   if (!editingTaskId) return;
   const name = document.getElementById("td_name").value.trim();
   if (!name) { alert("Task name is required."); return; }
+  const owner = resolveTaskOwnerFromInputs("td_ownerUid", "td_ownerOther");
+  if (!owner) {
+    alert("Please type a custom assignee name or choose a team assignee.");
+    return;
+  }
 
   try {
     await updateDoc(doc(db, "tasks", editingTaskId), {
       name,
-      owner:     document.getElementById("td_owner").value.trim() || "Team",
+      owner:     owner.owner,
+      ownerUid:  owner.ownerUid,
+      ownerName: owner.ownerName,
+      ownerType: owner.ownerType,
       due:       document.getElementById("td_due").value || "",
       priority:  document.getElementById("td_priority").value,
       done:      document.getElementById("td_done").value === "true",
@@ -1003,18 +1538,42 @@ function isMutedClient(client) {
   return client.status === "inactive" || client.status === "completed" || client.status === "one-time" || !client.recurring;
 }
 
+function clientMatchesSearch(client) {
+  const needle = String(clientsSearchTerm || "").trim().toLowerCase();
+  if (!needle) return true;
+  const haystack = [
+    client.companyName,
+    client.contactName,
+    client.email,
+    client.planName,
+    client.notes,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(needle);
+}
+
+window.clearClientsSearch = function () {
+  clientsSearchTerm = "";
+  const input = document.getElementById("clientsSearchInput");
+  if (input) input.value = "";
+  renderClientsWorkspace(currentClients);
+};
+
 function renderClientsWorkspace(clients) {
   const activeList = document.getElementById("clientsActiveList");
   const oneTimeList = document.getElementById("clientsOneTimeList");
   const inactiveList = document.getElementById("clientsInactiveList");
   if (!activeList || !oneTimeList || !inactiveList) return;
 
-  const inactive = clients.filter((c) => c.status === "inactive" || c.status === "completed");
-  const oneTime = clients.filter((c) =>
+  const scoped = clients.filter((client) => clientMatchesSearch(client));
+  const inactive = scoped.filter((c) => c.status === "inactive" || c.status === "completed");
+  const oneTime = scoped.filter((c) =>
     !(c.status === "inactive" || c.status === "completed")
     && (c.status === "one-time" || !c.recurring)
   );
-  const activeRecurring = clients.filter((c) =>
+  const activeRecurring = scoped.filter((c) =>
     !(c.status === "inactive" || c.status === "completed")
     && !(c.status === "one-time" || !c.recurring)
   );
@@ -1867,41 +2426,59 @@ function buildRequestTimeline(req, includeInternal = true) {
     });
   }
 
-  timeline.sort((a, b) => a.createdAtMs - b.createdAtMs);
+  timeline.sort((a, b) => b.createdAtMs - a.createdAtMs);
   return timeline;
 }
 
 function renderRequestTimelineHtml(req, includeInternal = true) {
   const timeline = buildRequestTimeline(req, includeInternal);
-  if (!timeline.length) {
-    return `<div class="empty-state" style="padding:14px;font-size:10px">No timeline updates yet.</div>`;
-  }
+  const timelineContent = timeline.length
+    ? `
+      <div class="request-timeline-list">
+        ${timeline.map((entry) => {
+          const statusChip = entry.status
+            ? `<span class="req-status ${requestStatusClass(entry.status)}">${requestStatusLabel(entry.status)}</span>`
+            : `<span class="timeline-chip">${escHtml(timelineKindLabel(entry.kind))}</span>`;
+          return `
+            <div class="request-timeline-item">
+              <div class="request-timeline-head">
+                <div class="request-timeline-head-left">
+                  ${statusChip}
+                  <span class="request-timeline-time">${escHtml(formatDateTimeLabel(entry.createdAtMs))}</span>
+                </div>
+                <span class="timeline-chip ${entry.visibility === "internal" ? "internal" : "client"}">
+                  ${entry.visibility === "internal" ? "Internal" : "Client Visible"}
+                </span>
+              </div>
+              <div class="request-timeline-text">${escHtml(timelineEntryDisplayText(entry))}</div>
+              <div class="request-timeline-meta">${escHtml(entry.actor || "Team")}</div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `
+    : `<div class="empty-state" style="padding:14px;font-size:10px">No timeline updates yet.</div>`;
 
   return `
-    <div class="request-timeline-list">
-      ${timeline.map((entry) => {
-        const statusChip = entry.status
-          ? `<span class="req-status ${requestStatusClass(entry.status)}">${requestStatusLabel(entry.status)}</span>`
-          : `<span class="timeline-chip">${escHtml(timelineKindLabel(entry.kind))}</span>`;
-        return `
-          <div class="request-timeline-item">
-            <div class="request-timeline-head">
-              <div class="request-timeline-head-left">
-                ${statusChip}
-                <span class="request-timeline-time">${escHtml(formatDateTimeLabel(entry.createdAtMs))}</span>
-              </div>
-              <span class="timeline-chip ${entry.visibility === "internal" ? "internal" : "client"}">
-                ${entry.visibility === "internal" ? "Internal" : "Client Visible"}
-              </span>
-            </div>
-            <div class="request-timeline-text">${escHtml(timelineEntryDisplayText(entry))}</div>
-            <div class="request-timeline-meta">${escHtml(entry.actor || "Team")}</div>
-          </div>
-        `;
-      }).join("")}
+    <div class="timeline-toolbar">
+      <span class="date-text">Newest first</span>
+      <button class="sort-pill" type="button" onclick="toggleTeamTimeline()">
+        ${teamTimelineExpanded ? "Collapse" : "Expand"}
+      </button>
+    </div>
+    <div class="request-timeline-shell${teamTimelineExpanded ? "" : " collapsed"}">
+      ${timelineContent}
     </div>
   `;
 }
+
+window.toggleTeamTimeline = function () {
+  teamTimelineExpanded = !teamTimelineExpanded;
+  if (editingRequestId) {
+    const req = currentClientRequests.find((item) => item.id === editingRequestId);
+    if (req) window.openRequestDetail(req.id);
+  }
+};
 
 function makeRequestTimelineEntry({ kind = "note", status = "", text = "", visibility = "client" }) {
   return {
@@ -2017,6 +2594,21 @@ function renderClientFlowBoard(cards) {
     });
   });
 }
+
+window.togglePipelineColumnCollapse = function (key) {
+  if (!key) return;
+  if (collapsedPipelineCols.has(key)) {
+    collapsedPipelineCols.delete(key);
+  } else {
+    collapsedPipelineCols.add(key);
+  }
+  renderPipeline(currentPipeline);
+};
+
+window.toggleLeadOverflow = function () {
+  showAllLeads = !showAllLeads;
+  renderPipeline(currentPipeline);
+};
 
 window.moveClientFlowCard = async function (id, nextStatus) {
   const card = currentClientFlow.find((item) => item.id === id);
@@ -2187,7 +2779,9 @@ window.saveRequestDetail = async function () {
   const nextPriority = document.getElementById("rd_priority").value;
   const nextStatus = document.getElementById("rd_status").value;
   const nextOwnerUid = String(document.getElementById("rd_ownerUid").value || "");
-  const nextOwnerName = nextOwnerUid ? resolveTeamUserName(nextOwnerUid, "") : "";
+  const nextOwnerName = isTeamAssignmentUid(nextOwnerUid)
+    ? "Entire Team"
+    : (nextOwnerUid ? resolveTeamUserName(nextOwnerUid, "") : "");
   const internalNotes = document.getElementById("rd_internalNotes").value.trim();
   const clientUpdate = document.getElementById("rd_clientUpdate").value.trim();
 
@@ -2491,7 +3085,9 @@ window.deleteDecisionItem = async function (docId, itemId) {
 
 // ─── ADD MODAL ────────────────────────────────────────────────────────────────
 window.openAddModal = function (type, context) {
-  modalMode    = type || currentPage;
+  const supportedModes = new Set(["pipeline", "tasks", "decisions", "clients"]);
+  const fallbackMode = supportedModes.has(currentPage) ? currentPage : "pipeline";
+  modalMode    = type || fallbackMode;
   modalContext = context || "";
 
   const titles = {
@@ -2510,6 +3106,13 @@ window.openAddModal = function (type, context) {
       syncServiceOtherField("f_service", "f_serviceOtherWrap", "f_serviceOther");
     });
     syncServiceOtherField("f_service", "f_serviceOtherWrap", "f_serviceOther");
+  }
+
+  if (modalMode === "tasks") {
+    document.getElementById("f_taskOwnerUid")?.addEventListener("change", () => {
+      syncTaskOwnerOtherField("f_taskOwnerUid", "f_taskOwnerOtherWrap", "f_taskOwnerOther");
+    });
+    syncTaskOwnerOtherField("f_taskOwnerUid", "f_taskOwnerOtherWrap", "f_taskOwnerOther");
   }
 
   if (modalMode === "decisions") {
@@ -2582,14 +3185,21 @@ function getModalForm(mode) {
   }
 
   if (mode === "tasks") {
+    const ownerOptions = taskAssigneeOptionsHtml({ ownerUid: TEAM_ASSIGNMENT_UID, ownerName: "Entire Team", ownerType: "team", owner: "Entire Team" });
     return `
       <div class="form-group">
         <label class="form-label">Task</label>
         <input class="form-input" id="f_name" placeholder="What needs to get done?">
       </div>
       <div class="form-group">
-        <label class="form-label">Owner</label>
-        <input class="form-input" id="f_owner" placeholder="Athan / Team / etc.">
+        <label class="form-label">Assigned To</label>
+        <select class="form-select" id="f_taskOwnerUid">
+          ${ownerOptions}
+        </select>
+      </div>
+      <div class="form-group" id="f_taskOwnerOtherWrap" style="display:none">
+        <label class="form-label">Other Assignee</label>
+        <input class="form-input" id="f_taskOwnerOther" placeholder="Type custom assignee">
       </div>
       <div class="form-group">
         <label class="form-label">Due Date</label>
@@ -2774,7 +3384,9 @@ window.saveModal = async function () {
         return;
       }
       const ownerUid = String(document.getElementById("f_ownerUid").value || "");
-      const ownerName = ownerUid ? resolveTeamUserName(ownerUid, "") : "";
+      const ownerName = isTeamAssignmentUid(ownerUid)
+        ? "Entire Team"
+        : (ownerUid ? resolveTeamUserName(ownerUid, "") : "");
       await addDoc(collection(db, "pipeline"), {
         title,
         company:   document.getElementById("f_company").value.trim(),
@@ -2792,13 +3404,22 @@ window.saveModal = async function () {
     else if (modalMode === "tasks") {
       const name = document.getElementById("f_name").value.trim();
       if (!name) { alert("Task name is required."); return; }
+      const owner = resolveTaskOwnerFromInputs("f_taskOwnerUid", "f_taskOwnerOther");
+      if (!owner) {
+        alert("Please type a custom assignee name or choose a team assignee.");
+        return;
+      }
       await addDoc(collection(db, "tasks"), {
         name,
-        owner:     document.getElementById("f_owner").value.trim() || "Team",
+        owner:     owner.owner,
+        ownerUid:  owner.ownerUid,
+        ownerName: owner.ownerName,
+        ownerType: owner.ownerType,
         due:       document.getElementById("f_due").value || "",
         priority:  document.getElementById("f_priority").value,
         done:      false,
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
     }
 
@@ -2900,12 +3521,17 @@ window.showPage = function (name, el) {
 
   const titles = {
     pipeline: "PIPELINE",
+    mywork: "MY WORK",
     tasks: "TASKS",
     decisions: "DECISIONS LOG",
     clients: "CLIENT OPS",
   };
   const el2    = document.getElementById("pageTitle");
   if (el2) el2.textContent = titles[name] || name.toUpperCase();
+
+  if (name === "mywork") {
+    renderMyWorkDashboard();
+  }
 };
 
 // ─── UTILITIES ────────────────────────────────────────────────────────────────
@@ -2937,4 +3563,7 @@ function uid() {
 toggleManagedProvisionClientField();
 populateManagedClientOptions();
 window.setManagedUsersFilter("client");
+renderMyWorkDashboard();
+
+
 

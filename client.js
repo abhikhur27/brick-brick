@@ -31,6 +31,7 @@ let unsubClientDoc = null;
 let unsubRequests = null;
 let currentRequests = [];
 let activeRequestId = null;
+let clientTimelineExpanded = true;
 
 document.body.style.visibility = "hidden";
 
@@ -270,6 +271,7 @@ onAuthStateChanged(auth, async (user) => {
     stopClientListeners();
     currentClientId = null;
     currentClient = null;
+    clientTimelineExpanded = true;
     setLoggedOutState();
     return;
   }
@@ -521,11 +523,28 @@ function renderClientRequestDetail(req) {
     </div>
 
     <div class="client-detail-section">
-      <div class="client-detail-label">Timeline & Team Updates</div>
-      <div class="timeline-list">${timelineHtml}</div>
+      <div class="timeline-toolbar">
+        <div class="client-detail-label">Timeline & Team Updates</div>
+        <div class="timeline-toolbar-right">
+          <span class="timeline-order-hint">Newest first</span>
+          <button class="btn btn-ghost" type="button" onclick="toggleClientTimeline()">
+            ${clientTimelineExpanded ? "Collapse" : "Expand"}
+          </button>
+        </div>
+      </div>
+      <div class="timeline-shell${clientTimelineExpanded ? "" : " collapsed"}">
+        <div class="timeline-list">${timelineHtml}</div>
+      </div>
     </div>
   `;
 }
+
+window.toggleClientTimeline = function () {
+  clientTimelineExpanded = !clientTimelineExpanded;
+  if (!activeRequestId) return;
+  const req = currentRequests.find((item) => item.id === activeRequestId);
+  if (req) renderClientRequestDetail(req);
+};
 
 function buildClientTimeline(req) {
   const timeline = [];
@@ -570,7 +589,7 @@ function buildClientTimeline(req) {
     });
   }
 
-  timeline.sort((a, b) => a.createdAtMs - b.createdAtMs);
+  timeline.sort((a, b) => b.createdAtMs - a.createdAtMs);
   return timeline;
 }
 
