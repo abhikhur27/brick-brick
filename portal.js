@@ -1,6 +1,6 @@
 // ─── FIREBASE SETUP ──────────────────────────────────────────────────────────
 import { initializeApp }          from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc,
          onSnapshot, serverTimestamp, query, orderBy }
@@ -30,6 +30,9 @@ let currentTasks     = [];
 let currentDecisions = [];
 let currentClients   = [];
 let currentClientRequests = [];
+let currentManagedUsers = [];
+let currentProvisioning = [];
+let managedRecordsByKey = new Map();
 
 // ─── TASK SORT STATE ─────────────────────────────────────────────────────────
 let taskSortField = "due";     // "due" | "createdAt" | "priority" | "owner" | "done"
@@ -41,6 +44,8 @@ let unsubTasks      = null;
 let unsubDecisions  = null;
 let unsubClients    = null;
 let unsubClientRequests = null;
+let unsubUsers = null;
+let unsubProvisioning = null;
 
 // ─── MODAL STATE ─────────────────────────────────────────────────────────────
 let modalMode    = "pipeline";
@@ -52,6 +57,8 @@ let selectedClientId = null;
 let currentUserRole = null;
 let draggingPipelineCardId = null;
 let suppressCardClickUntil = 0;
+let managedUsersFilter = "client";
+let editingManagedRecordKey = null;
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
 window.doLogin = async function () {
@@ -74,11 +81,7 @@ window.doLogin = async function () {
 };
 
 window.doLogout = async function () {
-  if (unsubPipeline)  unsubPipeline();
-  if (unsubTasks)     unsubTasks();
-  if (unsubDecisions) unsubDecisions();
-  if (unsubClients) unsubClients();
-  if (unsubClientRequests) unsubClientRequests();
+  stopRealtimeListeners();
   await signOut(auth);
 };
 
@@ -86,46 +89,132 @@ document.getElementById("loginPassword")?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") window.doLogin();
 });
 
-// Central auth-state observer — the ONLY place that shows/hides login vs workspace.
-async function getUserRole(uid) {
+document.getElementById("managedProvisionForm")?.addEventListener("submit", handleManagedProvisionSubmit);
+document.getElementById("managedProvisionRole")?.addEventListener("change", toggleManagedProvisionClientField);
+document.getElementById("managedUserOverlay")?.addEventListener("click", function (e) {
+  if (e.target === this) window.closeManagedUserModal();
+});
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isTeamRole(role) {
+  return role === "admin" || role === "super_admin";
+}
+
+function isSuperAdminRole(role) {
+  return role === "super_admin";
+}
+
+function toggleAccessManagerVisibility(show) {
+  const section = document.getElementById("accessManagerSection");
+  if (section) section.style.display = show ? "block" : "none";
+}
+
+async function getUserRecord(uid) {
   try {
     const snap = await getDoc(doc(db, "users", uid));
-    return snap.exists() ? String(snap.data().role || "") : "";
+    return snap.exists() ? snap.data() : null;
   } catch (err) {
-    console.error("getUserRole:", err);
-    return "";
+    console.error("getUserRecord:", err);
+    return null;
   }
+}
+
+async function bootstrapTeamUserFromProvision(user) {
+  const email = normalizeEmail(user?.email);
+  if (!email) return null;
+
+  try {
+    const provisionRef = doc(db, "login_provisioning", email);
+    const provisionSnap = await getDoc(provisionRef);
+    if (!provisionSnap.exists()) return null;
+
+    const provision = provisionSnap.data() || {};
+    const role = String(provision.role || "");
+    const status = String(provision.status || "active");
+    if (!isTeamRole(role) || status === "disabled") return null;
+
+    await setDoc(doc(db, "users", user.uid), {
+      role,
+      clientId: "",
+      email,
+      name: String(provision.name || ""),
+      notes: String(provision.notes || ""),
+      disabled: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+
+    await setDoc(provisionRef, {
+      email,
+      authUid: user.uid,
+      status: "active",
+      updatedAt: serverTimestamp(),
+      updatedByUid: user.uid,
+      linkedAt: serverTimestamp(),
+    }, { merge: true });
+
+    return { role, email };
+  } catch (err) {
+    console.error("bootstrapTeamUserFromProvision:", err);
+    return null;
+  }
+}
+
+async function resolvePortalUser(user) {
+  let userData = await getUserRecord(user.uid);
+  if (!userData) {
+    const bootstrapped = await bootstrapTeamUserFromProvision(user);
+    if (!bootstrapped) return null;
+    userData = await getUserRecord(user.uid);
+  }
+  return userData;
 }
 
 // Central auth-state observer - the ONLY place that shows/hides login vs workspace.
 onAuthStateChanged(auth, async (user) => {
-  // Reveal the page now that auth state is known (prevents flash)
   document.body.style.visibility = "visible";
 
-  if (user) {
-    currentUserRole = await getUserRole(user.uid);
-    if (currentUserRole !== "admin") {
-      await signOut(auth);
-      const errEl = document.getElementById("loginError");
-      if (errEl) errEl.textContent = "Internal workspace access is for admin/team accounts only.";
-      return;
-    }
-
-    document.getElementById("loginScreen").style.display = "none";
-    document.getElementById("app").classList.add("visible");
-
-    const el = document.getElementById("signedInAs");
-    if (el) el.textContent = user.email;
-
-    startListeners();
-  } else {
+  if (!user) {
     currentUserRole = null;
+    currentManagedUsers = [];
+    currentProvisioning = [];
+    managedRecordsByKey = new Map();
+    stopRealtimeListeners();
+    toggleAccessManagerVisibility(false);
     document.getElementById("loginScreen").style.display = "flex";
     document.getElementById("app").classList.remove("visible");
-
     const btn = document.getElementById("loginBtn");
-    if (btn) { btn.textContent = "ENTER WORKSPACE"; btn.disabled = false; }
+    if (btn) {
+      btn.textContent = "ENTER WORKSPACE";
+      btn.disabled = false;
+    }
+    return;
   }
+
+  const userData = await resolvePortalUser(user);
+  const role = String(userData?.role || "");
+  if (!isTeamRole(role) || userData?.disabled === true) {
+    await signOut(auth);
+    const errEl = document.getElementById("loginError");
+    if (errEl) errEl.textContent = "Internal workspace access is for admin/team accounts only.";
+    return;
+  }
+
+  currentUserRole = role;
+  document.getElementById("loginScreen").style.display = "none";
+  document.getElementById("app").classList.add("visible");
+  toggleAccessManagerVisibility(isSuperAdminRole(role));
+
+  const el = document.getElementById("signedInAs");
+  if (el) {
+    const roleLabel = role === "super_admin" ? "Super Admin" : "Admin";
+    el.textContent = `${user.email} (${roleLabel})`;
+  }
+
+  startListeners();
 });
 
 function friendlyAuthError(code) {
@@ -142,6 +231,8 @@ function friendlyAuthError(code) {
 
 // ─── REAL-TIME LISTENERS ──────────────────────────────────────────────────────
 function startListeners() {
+  stopRealtimeListeners();
+
   unsubPipeline = onSnapshot(
     query(collection(db, "pipeline"), orderBy("createdAt", "desc")),
     (snap) => {
@@ -188,6 +279,8 @@ function startListeners() {
         selectedClientId = null;
       }
       renderClientsWorkspace(currentClients);
+      populateManagedClientOptions();
+      renderManagedUsersTable();
     },
     (err) => console.error("Clients error:", err)
   );
@@ -201,14 +294,66 @@ function startListeners() {
     (err) => console.error("Client requests error:", err)
   );
 
+  if (isSuperAdminRole(currentUserRole)) {
+    startManagedUserListeners();
+  } else {
+    stopManagedUserListeners();
+    currentManagedUsers = [];
+    currentProvisioning = [];
+    managedRecordsByKey = new Map();
+  }
 }
 
-window.refreshAll = function () {
-  if (unsubPipeline)  unsubPipeline();
-  if (unsubTasks)     unsubTasks();
+function stopManagedUserListeners() {
+  if (unsubUsers) unsubUsers();
+  if (unsubProvisioning) unsubProvisioning();
+  unsubUsers = null;
+  unsubProvisioning = null;
+}
+
+function stopRealtimeListeners() {
+  if (unsubPipeline) unsubPipeline();
+  if (unsubTasks) unsubTasks();
   if (unsubDecisions) unsubDecisions();
   if (unsubClients) unsubClients();
   if (unsubClientRequests) unsubClientRequests();
+  stopManagedUserListeners();
+  unsubPipeline = null;
+  unsubTasks = null;
+  unsubDecisions = null;
+  unsubClients = null;
+  unsubClientRequests = null;
+}
+
+function startManagedUserListeners() {
+  stopManagedUserListeners();
+
+  unsubUsers = onSnapshot(
+    collection(db, "users"),
+    (snap) => {
+      currentManagedUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderManagedUsersTable();
+    },
+    (err) => {
+      console.error("Users listener error:", err);
+      setElementStatus("managedUsersStatus", "Could not load user profiles.", true);
+    }
+  );
+
+  unsubProvisioning = onSnapshot(
+    collection(db, "login_provisioning"),
+    (snap) => {
+      currentProvisioning = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderManagedUsersTable();
+    },
+    (err) => {
+      console.error("Provisioning listener error:", err);
+      setElementStatus("managedUsersStatus", "Could not load provisioning records.", true);
+    }
+  );
+}
+
+window.refreshAll = function () {
   startListeners();
 };
 
@@ -814,20 +959,74 @@ function renderClientDetailPane() {
   `;
 }
 
+async function upsertClientUserLink(authUid, clientId, email) {
+  const uid = String(authUid || "").trim();
+  if (!uid) return;
+  await setDoc(doc(db, "users", uid), {
+    role: "client",
+    clientId,
+    email: normalizeEmail(email),
+    disabled: false,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+}
+
+async function upsertClientProvisionRecord(clientId, clientData, options = {}) {
+  const nextEmail = normalizeEmail(clientData?.email);
+  const previousEmail = normalizeEmail(options.previousEmail);
+
+  if (previousEmail && previousEmail !== nextEmail) {
+    const previousRef = doc(db, "login_provisioning", previousEmail);
+    const previousSnap = await getDoc(previousRef);
+    if (previousSnap.exists()) {
+      const previous = previousSnap.data() || {};
+      if (String(previous.role || "") === "client" && String(previous.clientId || "") === clientId) {
+        await setDoc(previousRef, {
+          status: "disabled",
+          updatedAt: serverTimestamp(),
+          updatedByUid: auth.currentUser?.uid || "",
+        }, { merge: true });
+      }
+    }
+  }
+
+  if (!nextEmail) return;
+
+  await setDoc(doc(db, "login_provisioning", nextEmail), {
+    email: nextEmail,
+    role: "client",
+    clientId,
+    name: String(clientData.contactName || clientData.companyName || ""),
+    notes: String(clientData.notes || ""),
+    status: "active",
+    authUid: String(clientData.authUid || ""),
+    updatedAt: serverTimestamp(),
+    updatedByUid: auth.currentUser?.uid || "",
+    createdAt: serverTimestamp(),
+    createdByUid: auth.currentUser?.uid || "",
+  }, { merge: true });
+}
+
 window.saveClientDetail = async function () {
   if (!selectedClientId) return;
+
+  const existingClient = currentClients.find((c) => c.id === selectedClientId);
+  const email = normalizeEmail(document.getElementById("cd_email").value);
+  const authUid = document.getElementById("cd_authUid").value.trim();
+
   try {
     const updates = {
       companyName: document.getElementById("cd_companyName").value.trim(),
       contactName: document.getElementById("cd_contactName").value.trim(),
-      email: document.getElementById("cd_email").value.trim(),
-      authUid: document.getElementById("cd_authUid").value.trim(),
+      email,
+      emailLower: email,
+      authUid,
       planName: document.getElementById("cd_planName").value.trim(),
       status: document.getElementById("cd_status").value,
       recurring: document.getElementById("cd_recurring").value === "true",
       paid: document.getElementById("cd_paid").value === "true",
-      updatesPerMonth: Number(document.getElementById("cd_updatesPerMonth").value || 0),
-      updatesRemaining: Number(document.getElementById("cd_updatesRemaining").value || 0),
+      updatesPerMonth: Math.max(0, Number(document.getElementById("cd_updatesPerMonth").value || 0)),
+      updatesRemaining: Math.max(0, Number(document.getElementById("cd_updatesRemaining").value || 0)),
       lastPaymentNote: document.getElementById("cd_lastPaymentNote").value.trim(),
       billingNotes: document.getElementById("cd_billingNotes").value.trim(),
       notes: document.getElementById("cd_notes").value.trim(),
@@ -835,14 +1034,17 @@ window.saveClientDetail = async function () {
     };
     await updateDoc(doc(db, "clients", selectedClientId), updates);
 
-    if (updates.authUid) {
-      await setDoc(doc(db, "users", updates.authUid), {
-        role: "client",
-        clientId: selectedClientId,
-        email: updates.email || "",
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+    if (authUid) {
+      await upsertClientUserLink(authUid, selectedClientId, email);
     }
+
+    await upsertClientProvisionRecord(
+      selectedClientId,
+      { ...updates, authUid },
+      { previousEmail: existingClient?.email || "" }
+    );
+
+    setElementStatus("managedProvisionStatus", "Client saved and provisioning updated.", false);
   } catch (err) {
     console.error("saveClientDetail:", err);
     alert("Save failed: " + err.message);
@@ -870,6 +1072,408 @@ window.addClientBillingEntry = async function () {
   } catch (err) {
     console.error("addClientBillingEntry:", err);
     alert("Could not add billing entry.");
+  }
+};
+
+function setElementStatus(elementId, message, isError) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  el.textContent = message || "";
+  el.className = `form-status${isError ? " error" : ""}`;
+}
+
+function clientNameById(clientId) {
+  if (!clientId) return "Not linked";
+  const client = currentClients.find((c) => c.id === clientId);
+  return client?.companyName || client?.contactName || clientId;
+}
+
+function populateManagedClientOptions(selectedClientId = "", selectId = "managedProvisionClientId") {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const currentValue = selectedClientId || select.value || "";
+  const options = [`<option value="">Select client</option>`];
+  currentClients.forEach((client) => {
+    const label = `${client.companyName || "Unnamed Client"} (${clientStatusLabel(client.status || "active")})`;
+    options.push(
+      `<option value="${escHtmlAttr(client.id)}" ${client.id === currentValue ? "selected" : ""}>${escHtml(label)}</option>`
+    );
+  });
+  select.innerHTML = options.join("");
+}
+
+function toggleManagedProvisionClientField() {
+  const role = document.getElementById("managedProvisionRole")?.value || "client";
+  const wrap = document.getElementById("managedProvisionClientWrap");
+  if (!wrap) return;
+  wrap.style.display = role === "client" ? "" : "none";
+}
+
+function toggleManagedModalClientField() {
+  const role = document.getElementById("mu_role")?.value || "client";
+  const wrap = document.getElementById("mu_clientWrap");
+  if (!wrap) return;
+  wrap.style.display = role === "client" ? "" : "none";
+}
+
+function managedRoleLabel(role) {
+  if (role === "super_admin") return "Super Admin";
+  if (role === "admin") return "Admin";
+  return "Client";
+}
+
+function isTeamManagedRole(role) {
+  return role === "admin" || role === "super_admin";
+}
+
+function managedStatusLabel(record) {
+  const status = String(record.status || "active");
+  if (status === "disabled") return "Disabled";
+  if (record.uid) return "Linked";
+  return "Pending";
+}
+
+function deriveManagedRecords() {
+  const merged = new Map();
+
+  currentProvisioning.forEach((entry) => {
+    const email = normalizeEmail(entry.email || entry.id);
+    const role = String(entry.role || "");
+    const key = email ? `email:${email}` : `provision:${entry.id}`;
+    merged.set(key, {
+      key,
+      email,
+      role,
+      name: String(entry.name || ""),
+      notes: String(entry.notes || ""),
+      clientId: String(entry.clientId || ""),
+      status: String(entry.status || "active"),
+      provisionId: String(entry.id || ""),
+      uid: String(entry.authUid || ""),
+    });
+  });
+
+  currentManagedUsers.forEach((entry) => {
+    const email = normalizeEmail(entry.email || "");
+    const role = String(entry.role || "");
+    const key = email ? `email:${email}` : `uid:${entry.id}`;
+    const existing = merged.get(key);
+    if (existing) {
+      existing.uid = existing.uid || entry.id;
+      existing.role = existing.role || role;
+      existing.clientId = existing.clientId || String(entry.clientId || "");
+      existing.name = existing.name || String(entry.name || "");
+      existing.notes = existing.notes || String(entry.notes || "");
+      if (entry.disabled === true) existing.status = "disabled";
+      return;
+    }
+
+    merged.set(key, {
+      key,
+      email,
+      role,
+      name: String(entry.name || ""),
+      notes: String(entry.notes || ""),
+      clientId: String(entry.clientId || ""),
+      status: entry.disabled === true ? "disabled" : "active",
+      provisionId: email || "",
+      uid: entry.id,
+    });
+  });
+
+  return Array.from(merged.values())
+    .filter((record) => {
+      if (!record.role) return false;
+      if (managedUsersFilter === "admin") return isTeamManagedRole(record.role);
+      return record.role === "client";
+    })
+    .sort((a, b) => (a.email || "").localeCompare(b.email || ""));
+}
+
+function renderManagedUsersTable() {
+  const body = document.getElementById("managedUsersBody");
+  if (!body || !isSuperAdminRole(currentUserRole)) return;
+
+  const records = deriveManagedRecords();
+  managedRecordsByKey = new Map(records.map((record) => [record.key, record]));
+
+  body.innerHTML = "";
+  if (!records.length) {
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state" style="margin:18px 0">No users in this view yet.</div></td></tr>`;
+    return;
+  }
+
+  records.forEach((record) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escHtml(record.email || "No email")}</td>
+      <td>${escHtml(record.name || "-")}</td>
+      <td>${escHtml(managedRoleLabel(record.role))}</td>
+      <td>${escHtml(record.role === "client" ? clientNameById(record.clientId) : "—")}</td>
+      <td><span class="date-text">${escHtml(record.uid || "—")}</span></td>
+      <td>${escHtml(managedStatusLabel(record))}</td>
+    `;
+
+    const actionCell = document.createElement("td");
+    const manageBtn = document.createElement("button");
+    manageBtn.className = "card-btn";
+    manageBtn.type = "button";
+    manageBtn.textContent = "Manage";
+    manageBtn.addEventListener("click", () => window.openManagedUserModal(record.key));
+    actionCell.appendChild(manageBtn);
+    tr.appendChild(actionCell);
+    body.appendChild(tr);
+  });
+}
+
+window.setManagedUsersFilter = function (mode) {
+  managedUsersFilter = mode === "admin" ? "admin" : "client";
+  const clientsTab = document.getElementById("managedTabClients");
+  const adminsTab = document.getElementById("managedTabAdmins");
+  if (clientsTab) clientsTab.classList.toggle("active", managedUsersFilter === "client");
+  if (adminsTab) adminsTab.classList.toggle("active", managedUsersFilter === "admin");
+  renderManagedUsersTable();
+};
+
+async function upsertManagedProvision(data, options = {}) {
+  const email = normalizeEmail(data.email);
+  if (!email) throw new Error("Email is required.");
+
+  const role = String(data.role || "");
+  if (!["client", "admin", "super_admin"].includes(role)) {
+    throw new Error("Role must be client, admin, or super_admin.");
+  }
+
+  const clientId = role === "client" ? String(data.clientId || "") : "";
+  if (role === "client" && !clientId) {
+    throw new Error("Client role requires a linked client record.");
+  }
+
+  const previousEmail = normalizeEmail(options.previousEmail);
+  if (previousEmail && previousEmail !== email) {
+    const previousRef = doc(db, "login_provisioning", previousEmail);
+    const previousSnap = await getDoc(previousRef);
+    if (previousSnap.exists()) {
+      await setDoc(previousRef, {
+        status: "disabled",
+        updatedAt: serverTimestamp(),
+        updatedByUid: auth.currentUser?.uid || "",
+      }, { merge: true });
+    }
+  }
+
+  const status = String(data.status || "active");
+  await setDoc(doc(db, "login_provisioning", email), {
+    email,
+    role,
+    name: String(data.name || ""),
+    notes: String(data.notes || ""),
+    clientId,
+    status,
+    updatedAt: serverTimestamp(),
+    updatedByUid: auth.currentUser?.uid || "",
+    createdAt: serverTimestamp(),
+    createdByUid: auth.currentUser?.uid || "",
+  }, { merge: true });
+
+  const linkedUid =
+    String(options.linkedUid || "")
+    || String(currentManagedUsers.find((u) => normalizeEmail(u.email || "") === email)?.id || "");
+
+  if (linkedUid) {
+    await setDoc(doc(db, "users", linkedUid), {
+      role,
+      clientId,
+      email,
+      name: String(data.name || ""),
+      notes: String(data.notes || ""),
+      disabled: status === "disabled",
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }
+
+  if (role === "client" && clientId) {
+    const clientUpdate = {
+      email,
+      emailLower: email,
+      updatedAt: serverTimestamp(),
+    };
+    const nextAuthUid = linkedUid || String(data.authUid || "");
+    if (nextAuthUid) clientUpdate.authUid = nextAuthUid;
+    await updateDoc(doc(db, "clients", clientId), clientUpdate);
+  }
+}
+
+async function handleManagedProvisionSubmit(event) {
+  event.preventDefault();
+  if (!isSuperAdminRole(currentUserRole)) {
+    setElementStatus("managedProvisionStatus", "Only super admins can manage provisioning.", true);
+    return;
+  }
+
+  const email = normalizeEmail(document.getElementById("managedProvisionEmail")?.value || "");
+  const role = document.getElementById("managedProvisionRole")?.value || "client";
+  const clientId = document.getElementById("managedProvisionClientId")?.value || "";
+  const name = document.getElementById("managedProvisionName")?.value.trim() || "";
+  const notes = document.getElementById("managedProvisionNotes")?.value.trim() || "";
+
+  try {
+    await upsertManagedProvision({ email, role, clientId, name, notes, status: "active" });
+    setElementStatus("managedProvisionStatus", "Provision saved. User can sign in once Auth account exists.", false);
+    document.getElementById("managedProvisionForm")?.reset();
+    document.getElementById("managedProvisionRole").value = "client";
+    toggleManagedProvisionClientField();
+    populateManagedClientOptions();
+  } catch (err) {
+    console.error("handleManagedProvisionSubmit:", err);
+    setElementStatus("managedProvisionStatus", err.message || "Could not save provisioning.", true);
+  }
+}
+
+window.openManagedUserModal = function (recordKey) {
+  const record = managedRecordsByKey.get(recordKey);
+  if (!record) return;
+  editingManagedRecordKey = recordKey;
+
+  const body = document.getElementById("managedUserBody");
+  if (!body) return;
+
+  body.innerHTML = `
+    <div class="detail-grid">
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" id="mu_email" type="email" value="${escHtmlAttr(record.email || "")}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Name</label>
+        <input class="form-input" id="mu_name" value="${escHtmlAttr(record.name || "")}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Role</label>
+        <select class="form-select" id="mu_role">
+          <option value="client" ${record.role === "client" ? "selected" : ""}>Client</option>
+          <option value="admin" ${record.role === "admin" ? "selected" : ""}>Admin</option>
+          <option value="super_admin" ${record.role === "super_admin" ? "selected" : ""}>Super Admin</option>
+        </select>
+      </div>
+      <div class="form-group" id="mu_clientWrap">
+        <label class="form-label">Linked Client</label>
+        <select class="form-select" id="mu_clientId"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-select" id="mu_status">
+          <option value="active" ${record.status === "disabled" ? "" : "selected"}>Active</option>
+          <option value="disabled" ${record.status === "disabled" ? "selected" : ""}>Disabled</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Linked UID</label>
+        <div class="detail-meta-value">${escHtml(record.uid || "Not linked yet")}</div>
+      </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Notes</label>
+        <textarea class="form-input form-textarea" id="mu_notes" rows="4">${escHtml(record.notes || "")}</textarea>
+      </div>
+    </div>
+  `;
+
+  populateManagedClientOptions(record.clientId, "mu_clientId");
+  document.getElementById("mu_role")?.addEventListener("change", toggleManagedModalClientField);
+  toggleManagedModalClientField();
+
+  document.getElementById("managedUserOverlay")?.classList.add("open");
+};
+
+window.closeManagedUserModal = function () {
+  document.getElementById("managedUserOverlay")?.classList.remove("open");
+  editingManagedRecordKey = null;
+};
+
+window.saveManagedUser = async function () {
+  if (!editingManagedRecordKey) return;
+  const record = managedRecordsByKey.get(editingManagedRecordKey);
+  if (!record) return;
+
+  const email = normalizeEmail(document.getElementById("mu_email")?.value || "");
+  const role = document.getElementById("mu_role")?.value || "client";
+  const clientId = document.getElementById("mu_clientId")?.value || "";
+  const name = document.getElementById("mu_name")?.value.trim() || "";
+  const notes = document.getElementById("mu_notes")?.value.trim() || "";
+  const status = document.getElementById("mu_status")?.value || "active";
+
+  try {
+    await upsertManagedProvision(
+      { email, role, clientId, name, notes, status, authUid: record.uid || "" },
+      { previousEmail: record.email || "", linkedUid: record.uid || "" }
+    );
+    setElementStatus("managedUsersStatus", "Provision updated.", false);
+    window.closeManagedUserModal();
+  } catch (err) {
+    console.error("saveManagedUser:", err);
+    setElementStatus("managedUsersStatus", err.message || "Could not update provisioning.", true);
+  }
+};
+
+window.deleteManagedUser = async function () {
+  if (!editingManagedRecordKey) return;
+  const record = managedRecordsByKey.get(editingManagedRecordKey);
+  if (!record) return;
+
+  if (!confirm("Revoke this user's access? This disables provisioning and removes linked profile access.")) return;
+
+  try {
+    if (record.uid) {
+      await deleteDoc(doc(db, "users", record.uid));
+    }
+
+    const provisionId = normalizeEmail(record.provisionId || record.email);
+    if (provisionId) {
+      await setDoc(doc(db, "login_provisioning", provisionId), {
+        email: provisionId,
+        role: record.role || "client",
+        clientId: record.role === "client" ? String(record.clientId || "") : "",
+        name: String(record.name || ""),
+        notes: String(record.notes || ""),
+        status: "disabled",
+        authUid: "",
+        updatedAt: serverTimestamp(),
+        updatedByUid: auth.currentUser?.uid || "",
+      }, { merge: true });
+    }
+
+    if (record.role === "client" && record.clientId && record.uid) {
+      const clientRef = doc(db, "clients", record.clientId);
+      const clientSnap = await getDoc(clientRef);
+      if (clientSnap.exists() && String(clientSnap.data().authUid || "") === record.uid) {
+        await updateDoc(clientRef, {
+          authUid: "",
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+
+    setElementStatus("managedUsersStatus", "Access revoked.", false);
+    window.closeManagedUserModal();
+  } catch (err) {
+    console.error("deleteManagedUser:", err);
+    setElementStatus("managedUsersStatus", "Could not revoke access.", true);
+  }
+};
+
+window.sendManagedReset = async function () {
+  const email = normalizeEmail(document.getElementById("mu_email")?.value || "");
+  if (!email) {
+    setElementStatus("managedUsersStatus", "Enter a valid email before sending reset.", true);
+    return;
+  }
+
+  try {
+    await sendPasswordResetEmail(auth, email);
+    setElementStatus("managedUsersStatus", `Password reset sent to ${email}.`, false);
+  } catch (err) {
+    console.error("sendManagedReset:", err);
+    setElementStatus("managedUsersStatus", "Could not send reset email. Verify Auth account exists.", true);
   }
 };
 
@@ -1159,6 +1763,7 @@ document.addEventListener("keydown", (e) => {
     window.closeLeadDetail();
     window.closeTaskDetail();
     window.closeRequestDetail();
+    window.closeManagedUserModal();
   }
 });
 
@@ -1438,14 +2043,17 @@ window.saveModal = async function () {
       if (!companyName) { alert("Company name is required."); return; }
 
       const authUid = document.getElementById("f_authUid").value.trim();
-      const email = document.getElementById("f_email").value.trim();
+      const email = normalizeEmail(document.getElementById("f_email").value);
       const updatesPerMonth = Math.max(0, Number(document.getElementById("f_updatesPerMonth").value || 0));
       const updatesRemaining = Math.max(0, Number(document.getElementById("f_updatesRemaining").value || 0));
+      const contactName = document.getElementById("f_contactName").value.trim();
+      const notes = document.getElementById("f_clientNotes").value.trim();
 
       const clientRef = await addDoc(collection(db, "clients"), {
         companyName,
-        contactName: document.getElementById("f_contactName").value.trim(),
+        contactName,
         email,
+        emailLower: email,
         authUid,
         planName: document.getElementById("f_planName").value.trim(),
         recurring: document.getElementById("f_recurring").value === "true",
@@ -1453,7 +2061,7 @@ window.saveModal = async function () {
         status: document.getElementById("f_clientStatus").value,
         updatesPerMonth,
         updatesRemaining,
-        notes: document.getElementById("f_clientNotes").value.trim(),
+        notes,
         lastPaymentNote: document.getElementById("f_lastPaymentNote").value.trim(),
         billingNotes: document.getElementById("f_billingNotes").value.trim(),
         billingHistory: [],
@@ -1464,13 +2072,17 @@ window.saveModal = async function () {
       selectedClientId = clientRef.id;
 
       if (authUid) {
-        await setDoc(doc(db, "users", authUid), {
-          role: "client",
-          clientId: clientRef.id,
-          email: email || "",
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
+        await upsertClientUserLink(authUid, clientRef.id, email);
       }
+
+      await upsertClientProvisionRecord(clientRef.id, {
+        companyName,
+        contactName,
+        email,
+        authUid,
+        notes,
+      });
+      setElementStatus("managedProvisionStatus", "Client created and provisioning synced.", false);
     }
 
     window.closeModal();
@@ -1531,4 +2143,8 @@ function todayStr() {
 function uid() {
   return "_" + Math.random().toString(36).slice(2, 11);
 }
+
+toggleManagedProvisionClientField();
+populateManagedClientOptions();
+window.setManagedUsersFilter("client");
 

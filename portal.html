@@ -181,6 +181,71 @@
             </table>
           </div>
         </section>
+
+        <section class="clients-requests access-manager" id="accessManagerSection" style="display:none">
+          <div class="access-header">
+            <div>
+              <h3 class="tasks-section-title" style="margin-bottom:4px">Login Provisioning</h3>
+              <div class="access-subtitle">Super admin tools for client/admin onboarding on Spark-safe architecture.</div>
+            </div>
+            <div class="access-tabs">
+              <button class="sort-pill active" id="managedTabClients" type="button" onclick="setManagedUsersFilter('client')">Clients</button>
+              <button class="sort-pill" id="managedTabAdmins" type="button" onclick="setManagedUsersFilter('admin')">Admins</button>
+            </div>
+          </div>
+
+          <form id="managedProvisionForm" class="access-create-grid" novalidate>
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input class="form-input" id="managedProvisionEmail" type="email" placeholder="user@brick-brick.org" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Name</label>
+              <input class="form-input" id="managedProvisionName" type="text" placeholder="Display name (optional)">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Role</label>
+              <select class="form-select" id="managedProvisionRole">
+                <option value="client">Client</option>
+                <option value="admin">Admin</option>
+                <option value="super_admin">Super Admin</option>
+              </select>
+            </div>
+            <div class="form-group" id="managedProvisionClientWrap">
+              <label class="form-label">Linked Client</label>
+              <select class="form-select" id="managedProvisionClientId"></select>
+            </div>
+            <div class="form-group form-group-full">
+              <label class="form-label">Notes</label>
+              <input class="form-input" id="managedProvisionNotes" type="text" placeholder="Internal notes (optional)">
+            </div>
+            <div class="form-group access-create-actions">
+              <button class="btn btn-primary" id="managedProvisionBtn" type="submit">Save Provision</button>
+            </div>
+          </form>
+          <div class="form-status" id="managedProvisionStatus"></div>
+
+          <div class="tasks-wrap" style="margin-top:12px">
+            <table class="tasks">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Linked Client</th>
+                  <th>UID</th>
+                  <th>Status</th>
+                  <th style="width:108px"></th>
+                </tr>
+              </thead>
+              <tbody id="managedUsersBody"></tbody>
+            </table>
+          </div>
+          <div class="access-helper">
+            This section manages provisioning records and linked profiles. Creating/deleting auth accounts still requires Firebase Console on Spark.
+          </div>
+          <div class="form-status" id="managedUsersStatus"></div>
+        </section>
       </div>
 
     </div>
@@ -234,6 +299,19 @@
       <button class="btn btn-ghost" onclick="closeRequestDetail()">Close</button>
       <button class="btn btn-ghost" id="requestPushBtn" onclick="pushRequestToPipeline()">Push to Pipeline</button>
       <button class="btn btn-primary" onclick="saveRequestDetail()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="managedUserOverlay">
+  <div class="modal modal-wide" id="managedUserBox">
+    <div class="modal-title">PROVISION DETAIL</div>
+    <div id="managedUserBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeManagedUserModal()">Close</button>
+      <button class="btn btn-danger" id="managedUserDeleteBtn" onclick="deleteManagedUser()">Revoke Access</button>
+      <button class="btn btn-ghost" id="managedUserResetBtn" onclick="sendManagedReset()">Send Reset Link</button>
+      <button class="btn btn-primary" id="managedUserSaveBtn" onclick="saveManagedUser()">Save Provision</button>
     </div>
   </div>
 </div>

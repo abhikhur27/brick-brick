@@ -5,23 +5,136 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function hasAuthEmail() {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.size() > 0;
+    }
+
+    function authEmail() {
+      return request.auth.token.email;
+    }
+
     function hasUserRecord() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
     function isAdmin() {
       return hasUserRecord()
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+        && (userRole() == "admin" || userRole() == "super_admin");
+    }
+
+    function isSuperAdmin() {
+      return hasUserRecord()
+        && userRole() == "super_admin";
     }
 
     function isClient() {
       return hasUserRecord()
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "client";
+        && userRole() == "client"
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.disabled != true;
     }
 
     function myClientId() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.clientId;
+    }
+
+    function hasOwnProvision() {
+      return hasAuthEmail()
+        && exists(/databases/$(database)/documents/login_provisioning/$(authEmail()));
+    }
+
+    function ownProvisionIsActive() {
+      return hasOwnProvision()
+        && get(/databases/$(database)/documents/login_provisioning/$(authEmail())).data.status != "disabled";
+    }
+
+    function ownProvisionRole() {
+      return get(/databases/$(database)/documents/login_provisioning/$(authEmail())).data.role;
+    }
+
+    function ownProvisionClientId() {
+      return get(/databases/$(database)/documents/login_provisioning/$(authEmail())).data.clientId;
+    }
+
+    function ownProvisionHasClientId() {
+      return get(/databases/$(database)/documents/login_provisioning/$(authEmail())).data.keys().hasAny(["clientId"]);
+    }
+
+    function canMatchClientIdentity(clientId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/clients/$(clientId))
+        && (
+          get(/databases/$(database)/documents/clients/$(clientId)).data.authUid == request.auth.uid
+          || (hasAuthEmail() && get(/databases/$(database)/documents/clients/$(clientId)).data.email == authEmail())
+          || (hasAuthEmail() && get(/databases/$(database)/documents/clients/$(clientId)).data.emailLower == authEmail())
+        );
+    }
+
+    function isValidBootstrapPayload() {
+      return hasAuthEmail()
+        && request.resource.data.keys().hasOnly([
+          "role",
+          "clientId",
+          "email",
+          "name",
+          "notes",
+          "disabled",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.role is string
+        && request.resource.data.clientId is string
+        && request.resource.data.email is string
+        && request.resource.data.email == authEmail()
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp
+        && (
+          !request.resource.data.keys().hasAny(["disabled"])
+          || request.resource.data.disabled is bool
+        )
+        && (
+          !request.resource.data.keys().hasAny(["disabled"])
+          || request.resource.data.disabled == false
+        );
+    }
+
+    function canBootstrapClientRole() {
+      return request.resource.data.role == "client"
+        && request.resource.data.clientId.size() > 0
+        && canMatchClientIdentity(request.resource.data.clientId)
+        && (
+          !hasOwnProvision()
+          || (
+            ownProvisionIsActive()
+            && ownProvisionRole() == "client"
+            && (
+              !ownProvisionHasClientId()
+              || ownProvisionClientId() == ""
+              || ownProvisionClientId() == request.resource.data.clientId
+            )
+          )
+        );
+    }
+
+    function canBootstrapTeamRole() {
+      return (request.resource.data.role == "admin" || request.resource.data.role == "super_admin")
+        && hasOwnProvision()
+        && ownProvisionIsActive()
+        && ownProvisionRole() == request.resource.data.role;
+    }
+
+    function isSelfBootstrapCreate(uid) {
+      return isSignedIn()
+        && request.auth.uid == uid
+        && !exists(/databases/$(database)/documents/users/$(uid))
+        && isValidBootstrapPayload()
+        && (canBootstrapClientRole() || canBootstrapTeamRole());
     }
 
     // Allow public website form to create only constrained lead records.
@@ -112,7 +225,13 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
-      allow write: if isAdmin();
+      allow create: if isAdmin() || isSelfBootstrapCreate(uid);
+      allow update, delete: if isAdmin();
+    }
+
+    match /login_provisioning/{provisionId} {
+      allow read: if isSuperAdmin() || (hasAuthEmail() && provisionId == authEmail());
+      allow create, update, delete: if isSuperAdmin();
     }
 
     // INTERNAL TEAM WORKSPACE
@@ -130,7 +249,9 @@ service cloud.firestore {
     }
 
     match /clients/{clientId} {
-      allow read: if isAdmin() || (isClient() && myClientId() == clientId);
+      allow read: if isAdmin()
+        || (isClient() && myClientId() == clientId)
+        || canMatchClientIdentity(clientId);
       allow create, update, delete: if isAdmin();
     }
 

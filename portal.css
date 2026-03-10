@@ -813,6 +813,66 @@ table.tasks tr:hover td { background: var(--surface); }
   padding: 12px;
 }
 
+.access-manager {
+  margin-top: 14px;
+}
+
+.access-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.access-subtitle {
+  color: var(--silver-dim);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.access-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.access-create-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin-top: 10px;
+}
+
+.access-create-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  margin-bottom: 0;
+}
+
+.form-status {
+  min-height: 16px;
+  margin-top: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--green-soft);
+}
+
+.form-status.error {
+  color: var(--red-soft);
+}
+
+.access-helper {
+  margin-top: 10px;
+  color: var(--silver-dim);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .req-status {
   font-family: 'DM Mono', monospace;
   font-size: 9px;
@@ -1033,6 +1093,7 @@ table.tasks tr:hover td { background: var(--surface); }
 @media (max-width: 1100px) {
   .kanban { grid-template-columns: repeat(2, 1fr); }
   .clients-layout { grid-template-columns: 1fr; }
+  .access-create-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 900px) {
@@ -1050,6 +1111,7 @@ table.tasks tr:hover td { background: var(--surface); }
   .client-detail-grid { grid-template-columns: 1fr; }
   .inline-form-row { grid-template-columns: 1fr; }
   .sort-bar { gap: 5px; }
+  .access-create-grid { grid-template-columns: 1fr; }
 }
 /* ─── DYNAMIC DECISION ROWS (modal) ─────────────────────────────────────── */
 .decisions-rows-header {

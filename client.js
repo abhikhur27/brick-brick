@@ -9,10 +9,13 @@ import {
   getFirestore,
   doc,
   getDoc,
+  setDoc,
+  getDocs,
   onSnapshot,
   collection,
   query,
   where,
+  limit,
   addDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -119,6 +122,132 @@ requestForm?.addEventListener("submit", async (event) => {
   }
 });
 
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+async function findClientByIdentity(uid, email, preferredClientId) {
+  if (preferredClientId) {
+    const preferredSnap = await getDoc(doc(db, "clients", preferredClientId));
+    if (preferredSnap.exists()) {
+      const preferred = { id: preferredSnap.id, ...preferredSnap.data() };
+      if (
+        String(preferred.authUid || "") === uid
+        || normalizeEmail(preferred.email) === email
+      ) {
+        return { ok: true, client: preferred };
+      }
+      return {
+        ok: false,
+        error: "This login is not linked to the provisioned client record.",
+      };
+    }
+  }
+
+  const byUid = await getDocs(
+    query(collection(db, "clients"), where("authUid", "==", uid), limit(2))
+  );
+  if (byUid.size > 1) {
+    return { ok: false, error: "Multiple client records share this auth UID. Contact support." };
+  }
+  if (byUid.size === 1) {
+    const clientDoc = byUid.docs[0];
+    return { ok: true, client: { id: clientDoc.id, ...clientDoc.data() } };
+  }
+
+  const byEmail = await getDocs(
+    query(collection(db, "clients"), where("email", "==", email), limit(2))
+  );
+  if (byEmail.size > 1) {
+    return { ok: false, error: "Multiple client records share this email. Contact support." };
+  }
+  if (byEmail.size === 1) {
+    const clientDoc = byEmail.docs[0];
+    return { ok: true, client: { id: clientDoc.id, ...clientDoc.data() } };
+  }
+
+  const byEmailLower = await getDocs(
+    query(collection(db, "clients"), where("emailLower", "==", email), limit(2))
+  );
+  if (byEmailLower.size > 1) {
+    return { ok: false, error: "Multiple client records share this email. Contact support." };
+  }
+  if (byEmailLower.size === 1) {
+    const clientDoc = byEmailLower.docs[0];
+    return { ok: true, client: { id: clientDoc.id, ...clientDoc.data() } };
+  }
+
+  return { ok: false, error: "No client profile is linked to this account yet." };
+}
+
+async function bootstrapClientUserRecord(user) {
+  const email = normalizeEmail(user?.email);
+  if (!email) {
+    return { ok: false, error: "Account email is missing. Contact support." };
+  }
+
+  let provisionedClientId = "";
+  try {
+    const provisionSnap = await getDoc(doc(db, "login_provisioning", email));
+    if (provisionSnap.exists()) {
+      const provision = provisionSnap.data() || {};
+      if (String(provision.status || "active") === "disabled") {
+        return { ok: false, error: "This client login is disabled. Contact support." };
+      }
+      const provisionRole = String(provision.role || "client");
+      if (provisionRole !== "client") {
+        return { ok: false, error: "This login is not assigned to the client dashboard." };
+      }
+      provisionedClientId = String(provision.clientId || "");
+    }
+  } catch (err) {
+    console.error("client provisioning lookup:", err);
+  }
+
+  const match = await findClientByIdentity(user.uid, email, provisionedClientId);
+  if (!match.ok) return match;
+
+  const client = match.client;
+  await setDoc(doc(db, "users", user.uid), {
+    role: "client",
+    clientId: client.id,
+    email,
+    name: String(client.contactName || client.companyName || ""),
+    disabled: false,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  return {
+    ok: true,
+    userData: {
+      role: "client",
+      clientId: client.id,
+      email,
+    },
+  };
+}
+
+async function resolveClientAccess(user) {
+  const userSnap = await getDoc(doc(db, "users", user.uid));
+  if (userSnap.exists()) {
+    const userData = userSnap.data() || {};
+    if (String(userData.role || "") !== "client") {
+      return { ok: false, error: "This login is not assigned to the client dashboard." };
+    }
+    if (userData.disabled === true) {
+      return { ok: false, error: "This client login is disabled. Contact support." };
+    }
+    const clientId = String(userData.clientId || "");
+    if (!clientId) {
+      return { ok: false, error: "Client ID is missing on this account. Contact support." };
+    }
+    return { ok: true, userData: { ...userData, clientId } };
+  }
+
+  return bootstrapClientUserRecord(user);
+}
+
 onAuthStateChanged(auth, async (user) => {
   document.body.style.visibility = "visible";
 
@@ -130,30 +259,29 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
 
-  const userSnap = await getDoc(doc(db, "users", user.uid));
-  if (!userSnap.exists()) {
-    await signOut(auth);
-    loginErr.textContent = "No client profile is linked to this account yet.";
-    return;
-  }
+  try {
+    const access = await resolveClientAccess(user);
+    if (!access.ok) {
+      await signOut(auth);
+      loginErr.textContent = access.error || "No client profile is linked to this account yet.";
+      return;
+    }
 
-  const userData = userSnap.data();
-  if (String(userData.role || "") !== "client") {
-    await signOut(auth);
-    loginErr.textContent = "This login is not assigned to the client dashboard.";
-    return;
-  }
+    const clientId = String(access.userData.clientId || "");
+    if (!clientId) {
+      await signOut(auth);
+      loginErr.textContent = "Client profile is not linked correctly. Contact support.";
+      return;
+    }
 
-  const clientId = String(userData.clientId || "");
-  if (!clientId) {
+    currentClientId = clientId;
+    setLoggedInState(user.email || "");
+    startClientListeners(clientId);
+  } catch (err) {
+    console.error("client auth state:", err);
     await signOut(auth);
-    loginErr.textContent = "Client ID is missing on this account. Contact support.";
-    return;
+    loginErr.textContent = "Could not complete login. Please try again.";
   }
-
-  currentClientId = clientId;
-  setLoggedInState(user.email || "");
-  startClientListeners(clientId);
 });
 
 function setLoggedOutState() {
