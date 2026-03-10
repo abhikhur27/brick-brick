@@ -1,4 +1,5 @@
 const GO_SEQUENCE_MS = 1600;
+const HELP_SEEN_STORAGE_KEY = "bb_portal_help_seen_v1";
 
 let qkOverlay = null;
 let qkInput = null;
@@ -8,6 +9,10 @@ let qkOpen = false;
 let qkSelected = 0;
 let qkActions = [];
 let goModeUntil = 0;
+let qkHelpButton = null;
+let qkHelpPanel = null;
+let qkHelpHint = null;
+let qkHelpOpen = false;
 
 function isTypingTarget(target) {
   if (!target) return false;
@@ -64,6 +69,14 @@ function focusClientsSearch() {
   input.select?.();
 }
 
+function gotoMessagesRequests() {
+  gotoPage("clients");
+  window.requestAnimationFrame(() => {
+    const requestsSection = document.querySelector(".clients-requests");
+    requestsSection?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
 function makeActions() {
   return [
     {
@@ -74,11 +87,11 @@ function makeActions() {
       run: () => runWhenWorkspaceReady(() => gotoPage("pipeline")),
     },
     {
-      id: "go_mywork",
-      label: "Go to My Work",
+      id: "go_messages_requests",
+      label: "Go to Messages / Requests",
       hint: "G, M",
-      keywords: "my work ownership dashboard",
-      run: () => runWhenWorkspaceReady(() => gotoPage("mywork")),
+      keywords: "messages requests client requests inbox",
+      run: () => runWhenWorkspaceReady(() => gotoMessagesRequests()),
     },
     {
       id: "go_tasks",
@@ -95,9 +108,16 @@ function makeActions() {
       run: () => runWhenWorkspaceReady(() => gotoPage("clients")),
     },
     {
+      id: "go_dashboard",
+      label: "Go to Dashboard",
+      hint: "G, D",
+      keywords: "dashboard my work overview",
+      run: () => runWhenWorkspaceReady(() => gotoPage("mywork")),
+    },
+    {
       id: "go_decisions",
       label: "Go to Decisions Log",
-      hint: "G, D",
+      hint: "Quick action",
       keywords: "decisions meetings log",
       run: () => runWhenWorkspaceReady(() => gotoPage("decisions")),
     },
@@ -184,6 +204,51 @@ function ensureQkUi() {
   launcher.addEventListener("click", () => togglePalette(true));
   document.body.appendChild(launcher);
 
+  qkHelpButton = document.createElement("button");
+  qkHelpButton.type = "button";
+  qkHelpButton.className = "qk-help-btn";
+  qkHelpButton.textContent = "?";
+  qkHelpButton.setAttribute("aria-expanded", "false");
+  qkHelpButton.setAttribute("aria-label", "Open keyboard shortcuts help");
+  qkHelpButton.addEventListener("click", () => toggleHelp(!qkHelpOpen));
+  document.body.appendChild(qkHelpButton);
+
+  qkHelpPanel = document.createElement("section");
+  qkHelpPanel.className = "qk-help-panel";
+  qkHelpPanel.setAttribute("role", "dialog");
+  qkHelpPanel.setAttribute("aria-modal", "false");
+  qkHelpPanel.setAttribute("aria-label", "Keyboard shortcuts and quick tools help");
+  qkHelpPanel.innerHTML = `
+    <div class="qk-help-head">
+      <div class="qk-help-title">Keyboard + Quick Tools</div>
+      <button type="button" class="qk-help-close" id="qkHelpClose" aria-label="Close help">x</button>
+    </div>
+    <div class="qk-help-body">
+      <div class="qk-help-intro">
+        Quick Actions Launcher and keyboard shortcuts help you move through the workspace faster.
+      </div>
+      <div class="qk-help-section-title">Quick Actions Launcher</div>
+      <ul class="qk-help-list">
+        <li class="qk-help-row">
+          <span class="qk-help-key">Ctrl/Cmd + K</span>
+          <span class="qk-help-desc">Opens the Quick Actions command palette.</span>
+        </li>
+      </ul>
+      <div class="qk-help-section-title">Keyboard Navigation</div>
+      <ul class="qk-help-list">
+        <li class="qk-help-row"><span class="qk-help-key">G then P</span><span class="qk-help-desc">Jump to Pipeline page.</span></li>
+        <li class="qk-help-row"><span class="qk-help-key">G then M</span><span class="qk-help-desc">Jump to Messages / requests.</span></li>
+        <li class="qk-help-row"><span class="qk-help-key">G then T</span><span class="qk-help-desc">Jump to Tasks.</span></li>
+        <li class="qk-help-row"><span class="qk-help-key">G then C</span><span class="qk-help-desc">Jump to Clients.</span></li>
+        <li class="qk-help-row"><span class="qk-help-key">G then D</span><span class="qk-help-desc">Jump to Dashboard.</span></li>
+        <li class="qk-help-row"><span class="qk-help-key">Shift + N</span><span class="qk-help-desc">Opens a context-aware add modal.</span></li>
+        <li class="qk-help-row"><span class="qk-help-key">"/" key</span><span class="qk-help-desc">Focuses the client search input.</span></li>
+      </ul>
+      <div class="qk-help-tip">Tip: Press ? anytime to reopen this guide.</div>
+    </div>
+  `;
+  document.body.appendChild(qkHelpPanel);
+
   qkToast = document.createElement("div");
   qkToast.className = "qk-toast";
   document.body.appendChild(qkToast);
@@ -196,6 +261,16 @@ function ensureQkUi() {
     qkSelected = 0;
     renderActions();
   });
+
+  document.getElementById("qkHelpClose")?.addEventListener("click", () => toggleHelp(false));
+  document.addEventListener("click", (event) => {
+    if (!qkHelpOpen || !qkHelpPanel || !qkHelpButton) return;
+    const target = event.target;
+    if (qkHelpPanel.contains(target) || qkHelpButton.contains(target)) return;
+    toggleHelp(false);
+  });
+
+  maybeShowHelpNudge();
 }
 
 function filteredActions() {
@@ -252,6 +327,9 @@ function runSelectedAction() {
 function togglePalette(nextOpen) {
   ensureQkUi();
   qkOpen = nextOpen;
+  if (qkOpen) {
+    toggleHelp(false);
+  }
   qkOverlay.classList.toggle("open", qkOpen);
   if (qkOpen) {
     qkSelected = 0;
@@ -271,13 +349,62 @@ function showToast(message) {
   }, 1600);
 }
 
+function markHelpSeen() {
+  try {
+    localStorage.setItem(HELP_SEEN_STORAGE_KEY, "1");
+  } catch {
+    // Ignore localStorage errors.
+  }
+  qkHelpButton?.classList.remove("pulse");
+  if (qkHelpHint) {
+    qkHelpHint.remove();
+    qkHelpHint = null;
+  }
+}
+
+function toggleHelp(nextOpen) {
+  if (!qkHelpPanel || !qkHelpButton) return;
+  qkHelpOpen = Boolean(nextOpen);
+  qkHelpPanel.classList.toggle("open", qkHelpOpen);
+  qkHelpButton.classList.toggle("active", qkHelpOpen);
+  qkHelpButton.setAttribute("aria-expanded", qkHelpOpen ? "true" : "false");
+  if (qkHelpOpen) {
+    markHelpSeen();
+  }
+}
+
+function maybeShowHelpNudge() {
+  let seen = false;
+  try {
+    seen = localStorage.getItem(HELP_SEEN_STORAGE_KEY) === "1";
+  } catch {
+    seen = false;
+  }
+  if (seen || !qkHelpButton) return;
+
+  qkHelpButton.classList.add("pulse");
+  qkHelpHint = document.createElement("button");
+  qkHelpHint.type = "button";
+  qkHelpHint.className = "qk-help-hint";
+  qkHelpHint.textContent = "Shortcut Guide";
+  qkHelpHint.addEventListener("click", () => toggleHelp(true));
+  document.body.appendChild(qkHelpHint);
+
+  window.setTimeout(() => {
+    if (qkHelpHint) {
+      qkHelpHint.remove();
+      qkHelpHint = null;
+    }
+  }, 9000);
+}
+
 function handleGoSequence(event) {
   const now = Date.now();
   const key = String(event.key || "").toLowerCase();
 
   if (key === "g") {
     goModeUntil = now + GO_SEQUENCE_MS;
-    showToast("Go to: P pipeline | M my work | T tasks | C clients | D decisions");
+    showToast("Go to: P pipeline | M requests | T tasks | C clients | D dashboard");
     event.preventDefault();
     return true;
   }
@@ -286,10 +413,11 @@ function handleGoSequence(event) {
   goModeUntil = 0;
 
   if (key === "p") gotoPage("pipeline");
-  else if (key === "m") gotoPage("mywork");
+  else if (key === "m") gotoMessagesRequests();
   else if (key === "t") gotoPage("tasks");
   else if (key === "c") gotoPage("clients");
-  else if (key === "d") gotoPage("decisions");
+  else if (key === "d") gotoPage("mywork");
+  else if (key === "j") gotoPage("decisions");
   else return false;
 
   event.preventDefault();
@@ -332,8 +460,20 @@ function setupKeyboardShortcuts() {
       return;
     }
 
+    if (qkHelpOpen && key === "Escape") {
+      event.preventDefault();
+      toggleHelp(false);
+      return;
+    }
+
     if (!workspaceVisible()) return;
     if (isTypingTarget(event.target)) return;
+
+    if (key === "?") {
+      event.preventDefault();
+      toggleHelp(!qkHelpOpen);
+      return;
+    }
 
     if (event.shiftKey && key.toLowerCase() === "n") {
       event.preventDefault();
