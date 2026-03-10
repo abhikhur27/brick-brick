@@ -108,17 +108,13 @@ service cloud.firestore {
       return request.resource.data.role == "client"
         && request.resource.data.clientId.size() > 0
         && canMatchClientIdentity(request.resource.data.clientId)
+        && hasOwnProvision()
+        && ownProvisionIsActive()
+        && ownProvisionRole() == "client"
         && (
-          !hasOwnProvision()
-          || (
-            ownProvisionIsActive()
-            && ownProvisionRole() == "client"
-            && (
-              !ownProvisionHasClientId()
-              || ownProvisionClientId() == ""
-              || ownProvisionClientId() == request.resource.data.clientId
-            )
-          )
+          !ownProvisionHasClientId()
+          || ownProvisionClientId() == ""
+          || ownProvisionClientId() == request.resource.data.clientId
         );
     }
 
@@ -223,6 +219,39 @@ service cloud.firestore {
         && request.resource.data.updatedAt is timestamp;
     }
 
+    function isPublicContactSubmissionCreate() {
+      return request.auth == null
+        && request.resource.data.keys().hasOnly([
+          "name",
+          "email",
+          "phone",
+          "company",
+          "message",
+          "submittedAt",
+          "source",
+          "pipelineId",
+          "importedToPipelineAt"
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 160
+        && request.resource.data.email is string
+        && request.resource.data.email.size() > 0
+        && request.resource.data.email.size() <= 200
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() <= 40
+        && request.resource.data.company is string
+        && request.resource.data.company.size() <= 160
+        && request.resource.data.message is string
+        && request.resource.data.message.size() <= 4000
+        && request.resource.data.source == "website-contact-form"
+        && request.resource.data.pipelineId is string
+        && request.resource.data.pipelineId.size() > 0
+        && request.resource.data.pipelineId.size() <= 200
+        && request.resource.data.submittedAt is timestamp
+        && request.resource.data.importedToPipelineAt is timestamp;
+    }
+
     match /users/{uid} {
       allow read: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
       allow create: if isAdmin() || isSelfBootstrapCreate(uid);
@@ -251,7 +280,18 @@ service cloud.firestore {
     match /clients/{clientId} {
       allow read: if isAdmin()
         || (isClient() && myClientId() == clientId)
-        || canMatchClientIdentity(clientId);
+        || (
+          !hasUserRecord()
+          && hasOwnProvision()
+          && ownProvisionIsActive()
+          && ownProvisionRole() == "client"
+          && (
+            !ownProvisionHasClientId()
+            || ownProvisionClientId() == ""
+            || ownProvisionClientId() == clientId
+          )
+          && canMatchClientIdentity(clientId)
+        );
       allow create, update, delete: if isAdmin();
     }
 
@@ -269,7 +309,7 @@ service cloud.firestore {
     // Public visitors can create a submission.
     // Team admins can read/update/delete.
     match /contact_submissions/{docId} {
-      allow create: if true;
+      allow create: if isPublicContactSubmissionCreate() || isAdmin();
       allow read, update, delete: if isAdmin();
     }
   }

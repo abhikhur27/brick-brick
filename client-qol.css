@@ -1,0 +1,134 @@
+.qol-request-tools {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 10px;
+  margin: 0 0 12px;
+  background: rgba(9, 15, 23, 0.56);
+}
+
+.qol-request-tools-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.qol-request-tools-title {
+  font-size: 11px;
+  font-family: "DM Mono", monospace;
+  letter-spacing: 0.65px;
+  text-transform: uppercase;
+  color: rgba(220, 236, 255, 0.86);
+}
+
+.qol-chip-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qol-chip {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: #dce8fa;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-family: "DM Sans", sans-serif;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.qol-chip:hover {
+  border-color: rgba(133, 228, 209, 0.55);
+  background: rgba(133, 228, 209, 0.12);
+}
+
+.qol-counter {
+  margin-top: 4px;
+  font-size: 10px;
+  font-family: "DM Mono", monospace;
+  color: rgba(186, 206, 232, 0.9);
+  text-align: right;
+}
+
+.qol-counter.warn {
+  color: #f2c277;
+}
+
+.qol-counter.danger {
+  color: #f49292;
+}
+
+.qol-draft-status {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(176, 216, 254, 0.92);
+  min-height: 14px;
+}
+
+.qol-ghost-btn {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.04);
+  color: #cfdef4;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 10px;
+  font-family: "DM Mono", monospace;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.qol-requests-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.qol-requests-filters input,
+.qol-requests-filters select {
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(6, 10, 16, 0.55);
+  color: #ecf2fd;
+  font-size: 12px;
+  padding: 8px 10px;
+  font-family: "DM Sans", sans-serif;
+}
+
+.qol-copy-btn {
+  margin-left: auto;
+}
+
+.qol-toast {
+  position: fixed;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%) translateY(-6px);
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(130, 226, 207, 0.48);
+  background: rgba(8, 13, 22, 0.95);
+  color: #95efd8;
+  font-family: "DM Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.45px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 240;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.qol-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+@media (max-width: 760px) {
+  .qol-requests-filters {
+    grid-template-columns: 1fr;
+  }
+}
