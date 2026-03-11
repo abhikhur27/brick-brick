@@ -103,6 +103,37 @@ body::before {
 }
 .login-input:focus { border-color: var(--silver-dim); }
 
+.login-helper-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: -6px 0 12px;
+}
+
+.reset-link-btn {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.02);
+  color: var(--silver-dim);
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.reset-link-btn:hover:not(:disabled) {
+  border-color: var(--silver-dim);
+  color: var(--silver);
+  background: rgba(255,255,255,0.05);
+}
+
+.reset-link-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 .login-btn {
   width: 100%;
   background: var(--silver);
@@ -127,6 +158,10 @@ body::before {
   text-align: center;
   min-height: 16px;
   letter-spacing: 1px;
+}
+
+.login-error.is-success {
+  color: var(--green-soft);
 }
 
 .back-link {
@@ -358,6 +393,13 @@ body::before {
 #page-pipeline .kanban,
 #page-pipeline .lead-list-builder {
   margin: 0;
+}
+
+#page-pipeline .pipeline-radar { order: 1; }
+#page-pipeline .kanban { order: 2; }
+#page-pipeline .lead-list-builder {
+  order: 3;
+  margin-top: 8px;
 }
 
 .my-work-summary {
@@ -1388,6 +1430,7 @@ table.lead-list-table tr:last-child td {
 
 table.tasks { width: 100%; border-collapse: collapse; }
 table.tasks.tasks-main { table-layout: fixed; }
+table.tasks.tasks-main td { vertical-align: top; }
 
 table.tasks th {
   font-family: 'DM Mono', monospace;
@@ -1426,14 +1469,16 @@ table.tasks tr:hover td { background: var(--surface); }
 
 .task-name {
   color: var(--white);
+  display: block;
+  line-height: 1.35;
+  max-height: calc(1.35em * 2);
+  overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  overflow: hidden;
   word-break: break-word;
-  line-height: 1.35;
+  overflow-wrap: anywhere;
   min-width: 0;
-  flex: 1 1 auto;
 }
 .task-done-row .task-name { text-decoration: line-through; color: var(--silver-dim); }
 .task-done-row td { opacity: 0.5; }
@@ -1541,7 +1586,7 @@ table.tasks tr:hover td { background: var(--surface); }
 
 .task-owner-stack {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   flex-wrap: wrap;
 }
@@ -1598,6 +1643,7 @@ table.tasks tr:hover td { background: var(--surface); }
 
 .task-actions {
   display: flex;
+  align-items: flex-start;
   justify-content: flex-end;
   gap: 6px;
 }
@@ -2029,6 +2075,30 @@ tr.request-row-archived td {
   background: rgba(255,255,255,0.04);
 }
 
+.timeline-chip.unpaid {
+  color: var(--gold);
+  border-color: rgba(184,168,120,0.35);
+  background: rgba(184,168,120,0.1);
+}
+
+.timeline-chip.paid {
+  color: var(--green-soft);
+  border-color: rgba(88,214,141,0.35);
+  background: rgba(88,214,141,0.1);
+}
+
+.request-title-cell {
+  display: grid;
+  gap: 6px;
+}
+
+.request-title-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .decisions-log { max-width: 680px; }
 
 .decision-entry {
@@ -2087,6 +2157,11 @@ tr.request-row-archived td {
   margin-bottom: 8px;
 }
 
+.decision-item.is-editing {
+  border-color: rgba(93,173,226,0.4);
+  background: rgba(93,173,226,0.08);
+}
+
 .decision-item-header {
   display: flex;
   align-items: flex-start;
@@ -2095,12 +2170,27 @@ tr.request-row-archived td {
 
 .decision-item-text-wrap { flex: 1; }
 
-.decision-text  { font-size: 13px; color: var(--white); margin-bottom: 5px; line-height: 1.5; }
-.decision-owner { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--silver-dim); }
+.decision-text {
+  font-size: 13px;
+  color: var(--white);
+  margin-bottom: 4px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.decision-subtitle {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--silver-dim);
+  line-height: 1.4;
+}
 
 .decision-item-fields {
   display: grid;
   gap: 8px;
+  width: 100%;
 }
 
 .decision-item-input,
@@ -2112,6 +2202,7 @@ tr.request-row-archived td {
   display: flex;
   align-items: flex-start;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .item-delete {

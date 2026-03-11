@@ -18,7 +18,10 @@
     <div class="login-label">Email</div>
     <input class="login-input" type="email" id="loginEmail" placeholder="you@brick-brick.org" autocomplete="email">
     <div class="login-label">Password</div>
-    <input class="login-input" type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+    <input class="login-input" type="password" id="loginPassword" placeholder="Password" autocomplete="current-password">
+    <div class="login-helper-row">
+      <button class="reset-link-btn" id="loginResetBtn" type="button" onclick="sendPortalLoginReset()">Forgot password?</button>
+    </div>
     <button class="login-btn" id="loginBtn" onclick="doLogin()">ENTER WORKSPACE</button>
     <div class="login-error" id="loginError"></div>
     <a href="/" class="back-link">← Back to site</a>

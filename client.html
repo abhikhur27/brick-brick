@@ -21,6 +21,9 @@
 
       <label class="login-label" for="clientLoginPassword">Password</label>
       <input class="login-input" type="password" id="clientLoginPassword" placeholder="Password" autocomplete="current-password" required>
+      <div class="login-helper-row">
+        <button class="reset-link-btn" id="clientResetBtn" type="button" onclick="sendClientReset()">Forgot password?</button>
+      </div>
 
       <button class="login-btn" id="clientLoginBtn" type="submit">ENTER CLIENT PANEL</button>
       <div class="login-error" id="clientLoginError"></div>

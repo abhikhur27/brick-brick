@@ -4,6 +4,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
+  sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
   getFirestore,
@@ -24,6 +25,7 @@ import { firebaseConfig } from "./firebase-config.js";
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const CLIENT_RESET_RETURN_URL = new URL("/client.html", window.location.origin).toString();
 
 let currentClientId = null;
 let currentClient = null;
@@ -54,11 +56,11 @@ const requestCloseBtn = document.getElementById("clientRequestCloseBtn");
 
 loginForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  loginErr.textContent = "";
+  setClientLoginMessage("", true);
   const email = loginEmail.value.trim();
   const password = loginPassword.value;
   if (!email || !password) {
-    loginErr.textContent = "Enter email and password.";
+    setClientLoginMessage("Enter email and password.", true);
     return;
   }
 
@@ -67,11 +69,40 @@ loginForm?.addEventListener("submit", async (event) => {
   try {
     await signInWithEmailAndPassword(auth, email, password);
   } catch (err) {
-    loginErr.textContent = friendlyAuthError(err.code);
+    setClientLoginMessage(friendlyAuthError(err.code), true);
     loginBtn.disabled = false;
     loginBtn.textContent = "ENTER CLIENT PANEL";
   }
 });
+
+window.sendClientReset = async function () {
+  const email = normalizeEmail(loginEmail?.value || "");
+  const resetBtn = document.getElementById("clientResetBtn");
+  if (!email) {
+    setClientLoginMessage("Enter your email first, then click reset.", true);
+    return;
+  }
+
+  if (resetBtn) {
+    resetBtn.disabled = true;
+    resetBtn.textContent = "Sending...";
+  }
+  try {
+    await sendPasswordResetEmail(auth, email, {
+      url: CLIENT_RESET_RETURN_URL,
+      handleCodeInApp: false,
+    });
+    setClientLoginMessage(`Reset email sent to ${email}. After reset you will return to Client Panel.`, false);
+  } catch (err) {
+    console.error("sendClientReset:", err);
+    setClientLoginMessage(friendlyAuthError(err.code), true);
+  } finally {
+    if (resetBtn) {
+      resetBtn.disabled = false;
+      resetBtn.textContent = "Forgot password?";
+    }
+  }
+};
 
 logoutBtn?.addEventListener("click", async () => {
   stopClientListeners();
@@ -91,6 +122,8 @@ requestForm?.addEventListener("submit", async (event) => {
   const description = document.getElementById("crDescription")?.value.trim() || "";
   const category = document.getElementById("crCategory")?.value || "general_support";
   const priority = document.getElementById("crPriority")?.value || "normal";
+  const billingState = currentClient?.paid === false ? "unpaid" : "paid";
+  const unpaidAtSubmission = billingState === "unpaid";
 
   if (!title || !description) {
     setRequestStatus("Please include a title and description.", true);
@@ -110,6 +143,8 @@ requestForm?.addEventListener("submit", async (event) => {
       category,
       priority,
       status: "submitted",
+      billingState,
+      unpaidAtSubmission,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       source: "client-dashboard",
@@ -118,7 +153,11 @@ requestForm?.addEventListener("submit", async (event) => {
     requestForm.reset();
     const priorityEl = document.getElementById("crPriority");
     if (priorityEl) priorityEl.value = "normal";
-    setRequestStatus("Request submitted. We will review it shortly.", false);
+    if (unpaidAtSubmission) {
+      setRequestStatus("Request submitted and marked unpaid for billing follow-up. We will still review it shortly.", false);
+    } else {
+      setRequestStatus("Request submitted. We will review it shortly.", false);
+    }
   } catch (err) {
     console.error("client request submit:", err);
     setRequestStatus("Could not submit your request. Please try again.", true);
@@ -280,14 +319,14 @@ onAuthStateChanged(auth, async (user) => {
     const access = await resolveClientAccess(user);
     if (!access.ok) {
       await signOut(auth);
-      loginErr.textContent = access.error || "No client profile is linked to this account yet.";
+      setClientLoginMessage(access.error || "No client profile is linked to this account yet.", true);
       return;
     }
 
     const clientId = String(access.userData.clientId || "");
     if (!clientId) {
       await signOut(auth);
-      loginErr.textContent = "Client profile is not linked correctly. Contact support.";
+      setClientLoginMessage("Client profile is not linked correctly. Contact support.", true);
       return;
     }
 
@@ -297,7 +336,7 @@ onAuthStateChanged(auth, async (user) => {
   } catch (err) {
     console.error("client auth state:", err);
     await signOut(auth);
-    loginErr.textContent = "Could not complete login. Please try again.";
+    setClientLoginMessage("Could not complete login. Please try again.", true);
   }
 });
 
@@ -315,7 +354,7 @@ function setLoggedInState(email) {
   if (appScreen) appScreen.classList.add("visible");
   const signedIn = document.getElementById("cpSignedInAs");
   if (signedIn) signedIn.textContent = `Signed in as ${email}`;
-  if (loginErr) loginErr.textContent = "";
+  setClientLoginMessage("", true);
 }
 
 function startClientListeners(clientId) {
@@ -683,6 +722,12 @@ function toMillis(value) {
     return Number(value.seconds) * 1000;
   }
   return 0;
+}
+
+function setClientLoginMessage(message, isError = true) {
+  if (!loginErr) return;
+  loginErr.textContent = String(message || "");
+  loginErr.classList.toggle("is-success", !isError && Boolean(message));
 }
 
 function friendlyAuthError(code) {

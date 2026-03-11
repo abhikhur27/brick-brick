@@ -96,6 +96,37 @@ body::before {
   border-color: var(--silver-dim);
 }
 
+.login-helper-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: -4px 0 10px;
+}
+
+.reset-link-btn {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.02);
+  color: var(--silver-dim);
+  font-family: 'DM Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 9px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.reset-link-btn:hover:not(:disabled) {
+  border-color: var(--silver-dim);
+  color: var(--silver);
+  background: rgba(255,255,255,0.05);
+}
+
+.reset-link-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 .login-btn {
   width: 100%;
   border: none;
@@ -120,6 +151,10 @@ body::before {
   font-family: 'DM Mono', monospace;
   font-size: 11px;
   color: var(--red-soft);
+}
+
+.login-error.is-success {
+  color: var(--green-soft);
 }
 
 .back-link {

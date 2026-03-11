@@ -42,6 +42,8 @@ const LEAD_SERVICE_OPTIONS = [
 
 const TEAM_ASSIGNMENT_UID = "__team__";
 const OTHER_ASSIGNMENT_UID = "__other__";
+const TEAM_RESET_RETURN_URL = new URL("/portal.html", window.location.origin).toString();
+const CLIENT_RESET_RETURN_URL = new URL("/client.html", window.location.origin).toString();
 
 // ─── STATE CACHES (updated by real-time listeners) ───────────────────────────
 let currentPipeline  = [];
@@ -135,24 +137,50 @@ let draggingPipelineCardId = null;
 let suppressCardClickUntil = 0;
 let managedUsersFilter = "client";
 let editingManagedRecordKey = null;
+let editingDecisionItems = new Set();
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
 window.doLogin = async function () {
   const email    = document.getElementById("loginEmail").value.trim();
   const password = document.getElementById("loginPassword").value;
-  const errEl    = document.getElementById("loginError");
   const btn      = document.getElementById("loginBtn");
 
-  errEl.textContent = "";
-  btn.textContent   = "SIGNING IN…";
+  setPortalLoginMessage("", true);
+  btn.textContent   = "SIGNING IN...";
   btn.disabled      = true;
 
   try {
     await signInWithEmailAndPassword(auth, email, password);
   } catch (err) {
-    errEl.textContent = friendlyAuthError(err.code);
+    setPortalLoginMessage(friendlyAuthError(err.code), true);
     btn.textContent   = "ENTER WORKSPACE";
     btn.disabled      = false;
+  }
+};
+
+window.sendPortalLoginReset = async function () {
+  const email = normalizeEmail(document.getElementById("loginEmail")?.value || "");
+  const resetBtn = document.getElementById("loginResetBtn");
+  if (!email) {
+    setPortalLoginMessage("Enter your email first, then click reset.", true);
+    return;
+  }
+
+  if (resetBtn) {
+    resetBtn.disabled = true;
+    resetBtn.textContent = "Sending...";
+  }
+  try {
+    await sendPasswordResetEmail(auth, email, resetActionCodeSettingsForRole("admin"));
+    setPortalLoginMessage(`Reset email sent to ${email}. After reset you will return to Team Workspace.`, false);
+  } catch (err) {
+    console.error("sendPortalLoginReset:", err);
+    setPortalLoginMessage(friendlyAuthError(err.code), true);
+  } finally {
+    if (resetBtn) {
+      resetBtn.disabled = false;
+      resetBtn.textContent = "Forgot password?";
+    }
   }
 };
 
@@ -375,6 +403,7 @@ onAuthStateChanged(auth, async (user) => {
     currentManagedUsers = [];
     currentProvisioning = [];
     managedRecordsByKey = new Map();
+    editingDecisionItems = new Set();
     stopRealtimeListeners();
     toggleAccessManagerVisibility(false);
     document.getElementById("loginScreen").style.display = "flex";
@@ -384,6 +413,7 @@ onAuthStateChanged(auth, async (user) => {
       btn.textContent = "ENTER WORKSPACE";
       btn.disabled = false;
     }
+    setPortalLoginMessage("", true);
     const searchEl = document.getElementById("clientsSearchInput");
     if (searchEl) searchEl.value = "";
     return;
@@ -393,8 +423,7 @@ onAuthStateChanged(auth, async (user) => {
   const role = String(userData?.role || "");
   if (!isTeamRole(role) || userData?.disabled === true) {
     await signOut(auth);
-    const errEl = document.getElementById("loginError");
-    if (errEl) errEl.textContent = "Internal workspace access is for admin/team accounts only.";
+    setPortalLoginMessage("Internal workspace access is for admin/team accounts only.", true);
     return;
   }
 
@@ -422,6 +451,22 @@ function friendlyAuthError(code) {
     "auth/user-disabled":      "This account has been disabled.",
   };
   return map[code] || "Login failed. Check your credentials.";
+}
+
+function setPortalLoginMessage(message, isError = true) {
+  const errEl = document.getElementById("loginError");
+  if (!errEl) return;
+  errEl.textContent = String(message || "");
+  errEl.classList.toggle("is-success", !isError && Boolean(message));
+}
+
+function resetActionCodeSettingsForRole(role) {
+  const normalizedRole = String(role || "").toLowerCase();
+  const targetUrl = normalizedRole === "client" ? CLIENT_RESET_RETURN_URL : TEAM_RESET_RETURN_URL;
+  return {
+    url: targetUrl,
+    handleCodeInApp: false,
+  };
 }
 
 // ─── REAL-TIME LISTENERS ──────────────────────────────────────────────────────
@@ -3585,9 +3630,17 @@ window.sendManagedReset = async function () {
     return;
   }
 
+  const record = editingManagedRecordKey ? managedRecordsByKey.get(editingManagedRecordKey) : null;
+  const role = String(
+    record?.role
+      || document.getElementById("mu_role")?.value
+      || "client"
+  ).toLowerCase();
+  const returnLabel = role === "client" ? "Client Panel" : "Team Workspace";
+
   try {
-    await sendPasswordResetEmail(auth, email);
-    setElementStatus("managedUsersStatus", `Password reset sent to ${email}.`, false);
+    await sendPasswordResetEmail(auth, email, resetActionCodeSettingsForRole(role));
+    setElementStatus("managedUsersStatus", `Password reset sent to ${email}. Return path: ${returnLabel}.`, false);
   } catch (err) {
     console.error("sendManagedReset:", err);
     setElementStatus("managedUsersStatus", "Could not send reset email. Verify Auth account exists.", true);
@@ -3606,6 +3659,14 @@ function requestStatusLabel(status) {
   if (status === "scheduled") return "Scheduled";
   if (status === "done") return "Done";
   return "Submitted";
+}
+
+function requestBillingState(req = {}) {
+  const direct = String(req.billingState || "").toLowerCase();
+  if (direct === "paid" || direct === "unpaid") return direct;
+  if (req.unpaidAtSubmission === true) return "unpaid";
+  if (req.unpaidAtSubmission === false) return "paid";
+  return "";
 }
 
 function flowStageLabel(stage) {
@@ -3824,9 +3885,16 @@ function renderClientRequestsAdmin(requests) {
     const statusPill = req.archived === true
       ? `<span class="req-status rs-archived">Archived</span>`
       : `<span class="req-status ${requestStatusClass(req.status)}">${requestStatusLabel(req.status)}</span>`;
+    const billingState = requestBillingState(req);
+    const unpaidBadge = billingState === "unpaid"
+      ? `<span class="timeline-chip unpaid">Unpaid</span>`
+      : "";
     tr.innerHTML = `
       <td>${escHtml(req.clientName || "Unknown")}</td>
-      <td>${escHtml(req.title || "Untitled request")}</td>
+      <td class="request-title-cell">
+        <div>${escHtml(req.title || "Untitled request")}</div>
+        ${unpaidBadge ? `<div class="request-title-meta">${unpaidBadge}</div>` : ""}
+      </td>
       <td>${escHtml(req.category || "general")}</td>
       <td>${escHtml(req.priority || "normal")}</td>
       <td>${ownerCell}</td>
@@ -4733,6 +4801,12 @@ window.openRequestDetail = function (id) {
   editingRequestId = id;
   const ownerOptions = teamAssigneeOptionsHtml(req.ownerUid || "", req.ownerName || "");
   const activeInFlow = hasActiveForgeLaneCard(req);
+  const billingState = requestBillingState(req);
+  const billingLabel = billingState === "unpaid"
+    ? `<span class="timeline-chip unpaid">Unpaid at Submission</span>`
+    : (billingState === "paid"
+      ? `<span class="timeline-chip paid">Paid at Submission</span>`
+      : `<span class="timeline-chip internal">Billing Snapshot Unknown</span>`);
   document.getElementById("requestDetailBody").innerHTML = `
     <div class="detail-grid">
       ${req.archived === true ? `
@@ -4747,6 +4821,10 @@ window.openRequestDetail = function (id) {
       <div class="form-group">
         <label class="form-label">Category</label>
         <div class="detail-meta-value">${escHtml(req.category || "general")}</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Billing Snapshot</label>
+        <div class="detail-meta-value">${billingLabel}</div>
       </div>
       <div class="form-group form-group-full">
         <label class="form-label">Title</label>
@@ -5021,30 +5099,54 @@ function renderDecisions(decisions) {
 
     const items = Array.isArray(entry.items) ? entry.items : [];
     const itemsHtml = items.length
-      ? items.map((item) => `
-      <div class="decision-item" data-item-id="${item.id}">
+      ? items.map((item) => {
+        const itemText = String(item.text || "");
+        const itemOwner = String(item.owner || "");
+        const editing = editingDecisionItems.has(decisionItemEditKey(entry.id, item.id));
+        const subtitle = itemOwner ? `Owner: ${itemOwner}` : "Owner not set";
+        return `
+      <div class="decision-item${editing ? " is-editing" : ""}" data-item-id="${item.id}">
         <div class="decision-item-header">
           <div class="decision-item-text-wrap">
-            <div class="decision-item-fields">
-              <input class="form-input decision-item-input" id="dec_text_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" value="${escHtmlAttr(item.text || "")}" placeholder="Decision text">
-              <input class="form-input decision-item-owner-input" id="dec_owner_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" value="${escHtmlAttr(item.owner || "")}" placeholder="Owner / action">
-            </div>
+            ${
+              editing
+                ? `<div class="decision-item-fields">
+                     <input class="form-input decision-item-input" id="dec_text_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" value="${escHtmlAttr(itemText)}" placeholder="Decision text">
+                     <input class="form-input decision-item-owner-input" id="dec_owner_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" value="${escHtmlAttr(itemOwner)}" placeholder="Owner / action">
+                   </div>`
+                : `<div class="decision-text">${escHtml(itemText || "Untitled decision")}</div>
+                   <div class="decision-subtitle">${escHtml(subtitle)}</div>`
+            }
           </div>
           <div class="decision-item-actions">
-            <button
-              class="card-btn"
-              onclick="saveDecisionItem('${escHtmlAttr(entry.id)}', '${escHtmlAttr(item.id)}')"
-              title="Save this item"
-            >Save</button>
+            ${
+              editing
+                ? `<button
+                     class="card-btn"
+                     onclick="saveDecisionItem('${escHtmlAttr(entry.id)}', '${escHtmlAttr(item.id)}')"
+                     title="Save this item"
+                   >Save</button>
+                   <button
+                     class="card-btn"
+                     onclick="cancelDecisionItemEdit('${escHtmlAttr(entry.id)}', '${escHtmlAttr(item.id)}')"
+                     title="Cancel editing"
+                   >Cancel</button>`
+                : `<button
+                     class="card-btn"
+                     onclick="startDecisionItemEdit('${escHtmlAttr(entry.id)}', '${escHtmlAttr(item.id)}')"
+                     title="Edit this item"
+                   >Edit</button>`
+            }
             <button
               class="delete-entry-btn item-delete"
               onclick="deleteDecisionItem('${escHtmlAttr(entry.id)}', '${escHtmlAttr(item.id)}')"
               title="Delete this item"
-            >✕</button>
+            >&times;</button>
           </div>
         </div>
       </div>
-    `).join("")
+    `;
+      }).join("")
       : `<div class="empty-state" style="padding:14px;font-size:10px">No decision items yet.</div>`;
 
     el.innerHTML = `
@@ -5060,6 +5162,20 @@ function renderDecisions(decisions) {
     log.appendChild(el);
   });
 }
+
+function decisionItemEditKey(docId, itemId) {
+  return `${String(docId || "")}::${String(itemId || "")}`;
+}
+
+window.startDecisionItemEdit = function (docId, itemId) {
+  editingDecisionItems.add(decisionItemEditKey(docId, itemId));
+  renderDecisions(currentDecisions);
+};
+
+window.cancelDecisionItemEdit = function (docId, itemId) {
+  editingDecisionItems.delete(decisionItemEditKey(docId, itemId));
+  renderDecisions(currentDecisions);
+};
 
 window.saveDecisionItem = async function (docId, itemId) {
   const entry = currentDecisions.find((d) => d.id === docId);
@@ -5086,6 +5202,11 @@ window.saveDecisionItem = async function (docId, itemId) {
 
   try {
     await updateDoc(doc(db, "decisions", docId), { items });
+    editingDecisionItems.delete(decisionItemEditKey(docId, itemId));
+    currentDecisions = currentDecisions.map((decision) =>
+      decision.id === docId ? { ...decision, items } : decision
+    );
+    renderDecisions(currentDecisions);
   } catch (err) {
     console.error("saveDecisionItem:", err);
     alert("Could not save decision item.");
@@ -5097,10 +5218,16 @@ window.addDecisionItem = async function (docId) {
   if (!entry) return;
 
   const items = Array.isArray(entry.items) ? [...entry.items] : [];
-  items.push({ id: uid(), text: "New decision", owner: "" });
+  const newItem = { id: uid(), text: "New decision", owner: "" };
+  items.push(newItem);
 
   try {
     await updateDoc(doc(db, "decisions", docId), { items });
+    editingDecisionItems.add(decisionItemEditKey(docId, newItem.id));
+    currentDecisions = currentDecisions.map((decision) =>
+      decision.id === docId ? { ...decision, items } : decision
+    );
+    renderDecisions(currentDecisions);
   } catch (err) {
     console.error("addDecisionItem:", err);
     alert("Could not add decision item.");
@@ -5115,15 +5242,26 @@ window.deleteDecisionItem = async function (docId, itemId) {
   const entry = currentDecisions.find((d) => d.id === docId);
   if (!entry) return;
 
+  editingDecisionItems.delete(decisionItemEditKey(docId, itemId));
   const remaining = (entry.items || []).filter((i) => i.id !== itemId);
 
   if (remaining.length === 0) {
-    // Last item removed — ask before deleting the whole meeting entry
+    // Last item removed - ask before deleting the whole meeting entry
     if (!confirm("This is the last item in this meeting entry. Delete the entire entry?")) return;
-    try { await deleteDoc(doc(db, "decisions", docId)); }
+    try {
+      await deleteDoc(doc(db, "decisions", docId));
+      currentDecisions = currentDecisions.filter((decision) => decision.id !== docId);
+      renderDecisions(currentDecisions);
+    }
     catch (err) { console.error("deleteDecisionItem (doc):", err); }
   } else {
-    try { await updateDoc(doc(db, "decisions", docId), { items: remaining }); }
+    try {
+      await updateDoc(doc(db, "decisions", docId), { items: remaining });
+      currentDecisions = currentDecisions.map((decision) =>
+        decision.id === docId ? { ...decision, items: remaining } : decision
+      );
+      renderDecisions(currentDecisions);
+    }
     catch (err) { console.error("deleteDecisionItem (update):", err); }
   }
 };

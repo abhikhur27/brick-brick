@@ -195,6 +195,8 @@ service cloud.firestore {
           "category",
           "priority",
           "status",
+          "billingState",
+          "unpaidAtSubmission",
           "createdAt",
           "updatedAt",
           "source"
@@ -214,6 +216,12 @@ service cloud.firestore {
         && isAllowedRequestCategory(request.resource.data.category)
         && isAllowedRequestPriority(request.resource.data.priority)
         && request.resource.data.status == "submitted"
+        && (request.resource.data.billingState == "paid" || request.resource.data.billingState == "unpaid")
+        && request.resource.data.unpaidAtSubmission is bool
+        && (
+          (request.resource.data.billingState == "unpaid" && request.resource.data.unpaidAtSubmission == true)
+          || (request.resource.data.billingState == "paid" && request.resource.data.unpaidAtSubmission == false)
+        )
         && request.resource.data.source == "client-dashboard"
         && request.resource.data.createdAt is timestamp
         && request.resource.data.updatedAt is timestamp;
