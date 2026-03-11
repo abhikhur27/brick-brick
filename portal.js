@@ -42,8 +42,8 @@ const LEAD_SERVICE_OPTIONS = [
 
 const TEAM_ASSIGNMENT_UID = "__team__";
 const OTHER_ASSIGNMENT_UID = "__other__";
-const TEAM_RESET_RETURN_URL = new URL("/portal.html", window.location.origin).toString();
-const CLIENT_RESET_RETURN_URL = new URL("/client.html", window.location.origin).toString();
+const TEAM_RESET_RETURN_URL = new URL("/reset-password.html?portal=team", window.location.origin).toString();
+const CLIENT_RESET_RETURN_URL = new URL("/reset-password.html?portal=client", window.location.origin).toString();
 
 // ─── STATE CACHES (updated by real-time listeners) ───────────────────────────
 let currentPipeline  = [];
@@ -213,6 +213,21 @@ function isTeamRole(role) {
 
 function isSuperAdminRole(role) {
   return role === "super_admin";
+}
+
+function canEditDecisions() {
+  return isSuperAdminRole(currentUserRole);
+}
+
+function applyPortalLoginContextMessage() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("reset") === "success") {
+    setPortalLoginMessage("Password reset complete. Sign in to continue.", false);
+    params.delete("reset");
+    const nextQuery = params.toString();
+    const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash || ""}`;
+    window.history.replaceState({}, "", nextUrl);
+  }
 }
 
 function isTeamAssignmentUid(uid) {
@@ -414,6 +429,7 @@ onAuthStateChanged(auth, async (user) => {
       btn.disabled = false;
     }
     setPortalLoginMessage("", true);
+    applyPortalLoginContextMessage();
     const searchEl = document.getElementById("clientsSearchInput");
     if (searchEl) searchEl.value = "";
     return;
@@ -5097,13 +5113,14 @@ function renderDecisions(decisions) {
     const el = document.createElement("div");
     el.className = "decision-entry";
 
+    const canEdit = canEditDecisions();
     const items = Array.isArray(entry.items) ? entry.items : [];
     const itemsHtml = items.length
       ? items.map((item) => {
         const itemText = String(item.text || "");
         const itemOwner = String(item.owner || "");
-        const editing = editingDecisionItems.has(decisionItemEditKey(entry.id, item.id));
-        const subtitle = itemOwner ? `Owner: ${itemOwner}` : "Owner not set";
+        const editing = canEdit && editingDecisionItems.has(decisionItemEditKey(entry.id, item.id));
+        const subtitle = itemOwner || "No subtitle";
         return `
       <div class="decision-item${editing ? " is-editing" : ""}" data-item-id="${item.id}">
         <div class="decision-item-header">
@@ -5112,7 +5129,7 @@ function renderDecisions(decisions) {
               editing
                 ? `<div class="decision-item-fields">
                      <input class="form-input decision-item-input" id="dec_text_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" value="${escHtmlAttr(itemText)}" placeholder="Decision text">
-                     <input class="form-input decision-item-owner-input" id="dec_owner_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" value="${escHtmlAttr(itemOwner)}" placeholder="Owner / action">
+                     <input class="form-input decision-item-owner-input" id="dec_owner_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" value="${escHtmlAttr(itemOwner)}" placeholder="Subtitle (optional)">
                    </div>`
                 : `<div class="decision-text">${escHtml(itemText || "Untitled decision")}</div>
                    <div class="decision-subtitle">${escHtml(subtitle)}</div>`
@@ -5120,7 +5137,7 @@ function renderDecisions(decisions) {
           </div>
           <div class="decision-item-actions">
             ${
-              editing
+              canEdit && editing
                 ? `<button
                      class="card-btn"
                      onclick="saveDecisionItem('${escHtmlAttr(entry.id)}', '${escHtmlAttr(item.id)}')"
@@ -5131,17 +5148,23 @@ function renderDecisions(decisions) {
                      onclick="cancelDecisionItemEdit('${escHtmlAttr(entry.id)}', '${escHtmlAttr(item.id)}')"
                      title="Cancel editing"
                    >Cancel</button>`
-                : `<button
+                : canEdit
+                  ? `<button
                      class="card-btn"
                      onclick="startDecisionItemEdit('${escHtmlAttr(entry.id)}', '${escHtmlAttr(item.id)}')"
                      title="Edit this item"
                    >Edit</button>`
+                  : ""
             }
-            <button
+            ${
+              canEdit
+                ? `<button
               class="delete-entry-btn item-delete"
               onclick="deleteDecisionItem('${escHtmlAttr(entry.id)}', '${escHtmlAttr(item.id)}')"
               title="Delete this item"
-            >&times;</button>
+            >&times;</button>`
+                : ""
+            }
           </div>
         </div>
       </div>
@@ -5155,7 +5178,11 @@ function renderDecisions(decisions) {
           <span class="decision-title">${escHtml(titleStr)}</span>
           ${dateStr ? `<span class="decision-date-tag">${dateStr}</span>` : ""}
         </div>
-        <button class="card-btn" onclick="addDecisionItem('${escHtmlAttr(entry.id)}')">+ Add Item</button>
+        ${
+          canEdit
+            ? `<button class="card-btn" onclick="addDecisionItem('${escHtmlAttr(entry.id)}')">+ Add Item</button>`
+            : `<span class="decision-date-tag">View only (super admin edits)</span>`
+        }
       </div>
       ${itemsHtml}
     `;
@@ -5168,16 +5195,22 @@ function decisionItemEditKey(docId, itemId) {
 }
 
 window.startDecisionItemEdit = function (docId, itemId) {
+  if (!canEditDecisions()) return;
   editingDecisionItems.add(decisionItemEditKey(docId, itemId));
   renderDecisions(currentDecisions);
 };
 
 window.cancelDecisionItemEdit = function (docId, itemId) {
+  if (!canEditDecisions()) return;
   editingDecisionItems.delete(decisionItemEditKey(docId, itemId));
   renderDecisions(currentDecisions);
 };
 
 window.saveDecisionItem = async function (docId, itemId) {
+  if (!canEditDecisions()) {
+    alert("Only super admins can edit decisions.");
+    return;
+  }
   const entry = currentDecisions.find((d) => d.id === docId);
   if (!entry) return;
 
@@ -5214,6 +5247,10 @@ window.saveDecisionItem = async function (docId, itemId) {
 };
 
 window.addDecisionItem = async function (docId) {
+  if (!canEditDecisions()) {
+    alert("Only super admins can edit decisions.");
+    return;
+  }
   const entry = currentDecisions.find((d) => d.id === docId);
   if (!entry) return;
 
@@ -5239,6 +5276,10 @@ window.addDecisionItem = async function (docId) {
  * If no items remain, delete the whole document.
  */
 window.deleteDecisionItem = async function (docId, itemId) {
+  if (!canEditDecisions()) {
+    alert("Only super admins can edit decisions.");
+    return;
+  }
   const entry = currentDecisions.find((d) => d.id === docId);
   if (!entry) return;
 
@@ -5272,6 +5313,11 @@ window.openAddModal = function (type, context) {
   const fallbackMode = supportedModes.has(currentPage) ? currentPage : "pipeline";
   modalMode    = type || fallbackMode;
   modalContext = context || "";
+
+  if (modalMode === "decisions" && !canEditDecisions()) {
+    alert("Only super admins can log or edit decisions.");
+    return;
+  }
 
   const titles = {
     pipeline: "ADD LEAD",
@@ -5502,6 +5548,7 @@ function getModalForm(mode) {
 let decisionRowCount = 0;
 
 function resetDecisionRows() {
+  if (!canEditDecisions()) return;
   decisionRowCount = 0;
   const container = document.getElementById("decisionRowsContainer");
   if (!container) return;
@@ -5525,13 +5572,14 @@ function buildDecisionRow(n) {
         <input class="form-input decision-row-text" placeholder="What was decided?">
       </div>
       <div class="form-group">
-        <input class="form-input decision-row-owner" placeholder="Owner / action">
+        <input class="form-input decision-row-owner" placeholder="Subtitle (optional)">
       </div>
     </div>
   `;
 }
 
 window.addDecisionRow = function () {
+  if (!canEditDecisions()) return;
   decisionRowCount++;
   const container = document.getElementById("decisionRowsContainer");
   if (!container) return;
@@ -5543,6 +5591,7 @@ window.addDecisionRow = function () {
 };
 
 window.removeDecisionRow = function (n) {
+  if (!canEditDecisions()) return;
   const row = document.getElementById("drow-" + n);
   if (row) row.remove();
   updateRemoveButtons();
@@ -5607,6 +5656,10 @@ window.saveModal = async function () {
     }
 
     else if (modalMode === "decisions") {
+      if (!canEditDecisions()) {
+        alert("Only super admins can log or edit decisions.");
+        return;
+      }
       const meetingTitle = document.getElementById("f_mtitle").value.trim();
       const meetingDate  = document.getElementById("f_mdate").value || todayStr();
       if (!meetingTitle) { alert("Meeting title is required."); return; }

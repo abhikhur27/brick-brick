@@ -25,7 +25,7 @@ import { firebaseConfig } from "./firebase-config.js";
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const CLIENT_RESET_RETURN_URL = new URL("/client.html", window.location.origin).toString();
+const CLIENT_RESET_RETURN_URL = new URL("/reset-password.html?portal=client", window.location.origin).toString();
 
 let currentClientId = null;
 let currentClient = null;
@@ -53,6 +53,8 @@ const requestStatus = document.getElementById("crStatus");
 const requestDetailOverlay = document.getElementById("clientRequestDetailOverlay");
 const requestDetailBody = document.getElementById("clientRequestDetailBody");
 const requestCloseBtn = document.getElementById("clientRequestCloseBtn");
+
+applyClientLoginContextMessage();
 
 loginForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -728,6 +730,17 @@ function setClientLoginMessage(message, isError = true) {
   if (!loginErr) return;
   loginErr.textContent = String(message || "");
   loginErr.classList.toggle("is-success", !isError && Boolean(message));
+}
+
+function applyClientLoginContextMessage() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("reset") === "success") {
+    setClientLoginMessage("Password reset complete. Sign in to continue.", false);
+    params.delete("reset");
+    const nextQuery = params.toString();
+    const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash || ""}`;
+    window.history.replaceState({}, "", nextUrl);
+  }
 }
 
 function friendlyAuthError(code) {

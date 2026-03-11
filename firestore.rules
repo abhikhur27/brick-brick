@@ -286,7 +286,8 @@ service cloud.firestore {
     }
 
     match /decisions/{docId} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin();
+      allow create, update, delete: if isSuperAdmin();
     }
 
     match /clients/{clientId} {
