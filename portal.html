@@ -94,6 +94,14 @@
         <div class="my-work-grid">
           <section class="my-work-card">
             <div class="my-work-card-head">
+              <h3 class="tasks-section-title">Today's Calls</h3>
+              <span class="date-text">Due now + overdue follow-ups</span>
+            </div>
+            <div class="my-work-list" id="myCallsList"></div>
+          </section>
+
+          <section class="my-work-card">
+            <div class="my-work-card-head">
               <h3 class="tasks-section-title">My Leads</h3>
               <span class="date-text">Assigned to you</span>
             </div>
@@ -365,6 +373,16 @@
       <button class="btn btn-danger" id="managedUserDeleteBtn" onclick="deleteManagedUser()">Revoke Access</button>
       <button class="btn btn-ghost" id="managedUserResetBtn" onclick="sendManagedReset()">Send Reset Link</button>
       <button class="btn btn-primary" id="managedUserSaveBtn" onclick="saveManagedUser()">Save Provision</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="leadMergeOverlay">
+  <div class="modal modal-wide" id="leadMergeBox">
+    <div class="modal-title">LEAD MERGE ASSISTANT</div>
+    <div id="leadMergeBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeLeadMergeAssistant()">Close</button>
     </div>
   </div>
 </div>

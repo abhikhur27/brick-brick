@@ -467,6 +467,30 @@ body::before {
   margin-top: 0;
 }
 
+.my-call-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.my-call-chip.overdue {
+  color: var(--red-soft);
+  border-color: rgba(236, 112, 99, 0.35);
+  background: rgba(236, 112, 99, 0.1);
+}
+
+.my-call-chip.today {
+  color: var(--gold);
+  border-color: rgba(184, 168, 120, 0.35);
+  background: rgba(184, 168, 120, 0.12);
+}
+
 /* ─── TASK SORT BAR ──────────────────────────────────────────────────────── */
 .sort-bar {
   display: flex;
@@ -934,6 +958,63 @@ table.lead-list-table tr:hover td {
   color: var(--gold);
   border-color: rgba(184, 168, 120, 0.35);
   background: rgba(184, 168, 120, 0.1);
+}
+
+.merge-assist-list {
+  display: grid;
+  gap: 10px;
+}
+
+.merge-assist-row {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface2);
+  padding: 10px;
+}
+
+.merge-assist-row.primary {
+  border-color: rgba(93, 173, 226, 0.35);
+  background: rgba(93, 173, 226, 0.08);
+}
+
+.merge-assist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.merge-assist-title {
+  color: var(--white);
+  font-size: 13px;
+}
+
+.merge-assist-note {
+  margin-top: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--silver-dim);
+  line-height: 1.45;
+}
+
+.merge-assist-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.merge-assist-badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--silver-dim);
+  background: rgba(255,255,255,0.03);
 }
 
 table.lead-list-table tr:last-child td {

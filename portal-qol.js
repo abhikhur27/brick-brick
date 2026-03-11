@@ -77,6 +77,14 @@ function gotoMessagesRequests() {
   });
 }
 
+function gotoMyCalls() {
+  gotoPage("mywork");
+  window.requestAnimationFrame(() => {
+    const callsList = document.getElementById("myCallsList");
+    callsList?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
 function setPipelineRadarFilter(filter, toastLabel) {
   gotoPage("pipeline");
   if (typeof window.setPipelineFocusFilter !== "function") {
@@ -203,6 +211,13 @@ function makeActions() {
       hint: "G, D",
       keywords: "dashboard my work overview",
       run: () => runWhenWorkspaceReady(() => gotoPage("mywork")),
+    },
+    {
+      id: "go_my_calls",
+      label: "Go to Today's Calls",
+      hint: "My Work",
+      keywords: "calls follow up today overdue queue",
+      run: () => runWhenWorkspaceReady(() => gotoMyCalls()),
     },
     {
       id: "go_decisions",

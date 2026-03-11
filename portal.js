@@ -110,6 +110,7 @@ let modalContext = "";
 let editingLeadId = null;   // ID of the lead currently open in detail modal
 let editingTaskId = null;   // ID of the task currently open in detail modal
 let editingRequestId = null;
+let mergePrimaryLeadId = null;
 let selectedClientId = null;
 let currentUserRole = null;
 let draggingPipelineCardId = null;
@@ -318,6 +319,8 @@ onAuthStateChanged(auth, async (user) => {
 
   if (!user) {
     currentUserRole = null;
+    currentPipeline = [];
+    mergePrimaryLeadId = null;
     currentClientFlow = [];
     currentClientRequests = [];
     currentTeamUsers = [];
@@ -955,6 +958,26 @@ function followUpClassForBucket(bucket) {
   return "lead-followup-later";
 }
 
+function mergeLeadNoteText(primaryNote, secondaryNote, secondaryId) {
+  const left = String(primaryNote || "").trim();
+  const right = String(secondaryNote || "").trim();
+  if (!right) return left;
+  if (left && left.includes(right)) return left;
+  const stamp = formatDateTimeLabel(Date.now());
+  const block = `[Merged from lead #${String(secondaryId || "").slice(0, 6)} on ${stamp}]\n${right}`;
+  if (!left) return block;
+  return `${left}\n\n${block}`;
+}
+
+function mergeArchivedNoteText(existingNote, primaryId, primaryTitle) {
+  const left = String(existingNote || "").trim();
+  const stamp = formatDateTimeLabel(Date.now());
+  const block = `Merged into lead #${String(primaryId || "").slice(0, 6)} (${String(primaryTitle || "Primary Lead").trim()}) on ${stamp}.`;
+  if (!left) return block;
+  if (left.includes(block)) return left;
+  return `${left}\n\n${block}`;
+}
+
 function leadFollowUpPriorityScore(card) {
   if (isPipelineLeadClosed(card)) return 0;
   let score = 0;
@@ -1308,6 +1331,11 @@ function renderLeadListBuilder(cards) {
                            ? `<div class="lead-list-subtext">${escHtml(lead.duplicateHint)}</div>`
                            : ""
                        }
+                       ${
+                         lead.duplicateCount > 1
+                           ? `<div class="merge-assist-actions"><button class="card-btn lead-list-open-btn" type="button" onclick="openLeadMergeAssistant('${escHtmlAttr(lead.id)}')">Review</button></div>`
+                           : ""
+                       }
                      </td>
                      <td class="date-text">${escHtml(formatDateTimeLabel(lead.createdMs))}</td>
                      <td><button class="card-btn lead-list-open-btn" type="button" onclick="openLeadDetail('${escHtmlAttr(lead.id)}')">Open</button></td>
@@ -1408,14 +1436,16 @@ function renderPipelineRadar(cards, visibleCards) {
 
 function renderMyWorkDashboard() {
   const summaryEl = document.getElementById("myWorkSummary");
+  const callsEl = document.getElementById("myCallsList");
   const leadsEl = document.getElementById("myLeadsList");
   const requestsEl = document.getElementById("myRequestsList");
   const tasksEl = document.getElementById("myTasksList");
-  if (!summaryEl || !leadsEl || !requestsEl || !tasksEl) return;
+  if (!summaryEl || !callsEl || !leadsEl || !requestsEl || !tasksEl) return;
 
   const currentUid = String(auth.currentUser?.uid || "");
   if (!currentUid) {
     summaryEl.innerHTML = "";
+    callsEl.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">Sign in to view your ownership dashboard.</div>`;
     leadsEl.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">Sign in to view your ownership dashboard.</div>`;
     requestsEl.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">Sign in to view your ownership dashboard.</div>`;
     tasksEl.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">Sign in to view your ownership dashboard.</div>`;
@@ -1472,15 +1502,53 @@ function renderMyWorkDashboard() {
   const visibleMyTasks = showCompletedMyTasks ? allMyTasks : openMyTasks;
 
   const leadsNeedingFollowUp = myLeads.filter((card) => String(card.status || "") === "leads").length;
+  const myCallLeads = myLeads
+    .map((card) => {
+      const nextFollowUpMs = leadNextFollowUpMs(card);
+      const followUpBucket = followUpBucketForMs(nextFollowUpMs);
+      return { ...card, nextFollowUpMs, followUpBucket };
+    })
+    .filter((card) => card.followUpBucket === "overdue" || card.followUpBucket === "due_today")
+    .sort((a, b) => {
+      const aw = a.followUpBucket === "overdue" ? 0 : 1;
+      const bw = b.followUpBucket === "overdue" ? 0 : 1;
+      if (aw !== bw) return aw - bw;
+      return (a.nextFollowUpMs || Number.MAX_SAFE_INTEGER) - (b.nextFollowUpMs || Number.MAX_SAFE_INTEGER);
+    });
   const highPriorityRequests = activeMyRequests.filter((req) => String(req.priority || "normal") === "high").length;
   summaryEl.innerHTML = `
     <div class="my-work-pill">My Leads: <strong>${myLeads.length}</strong></div>
     <div class="my-work-pill">Need follow-up: <strong>${leadsNeedingFollowUp}</strong></div>
+    <div class="my-work-pill">Calls Today: <strong>${myCallLeads.length}</strong></div>
     <div class="my-work-pill">My Requests (Active): <strong>${activeMyRequests.length}</strong></div>
     <div class="my-work-pill">My Requests (Archived): <strong>${archivedMyRequests.length}</strong></div>
     <div class="my-work-pill">My Tasks (Open): <strong>${openMyTasks.length}</strong></div>
     <div class="my-work-pill">High Priority: <strong>${highPriorityRequests}</strong></div>
   `;
+
+  if (!myCallLeads.length) {
+    callsEl.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">No calls due right now. Great job staying on top of follow-ups.</div>`;
+  } else {
+    callsEl.innerHTML = myCallLeads.slice(0, 12).map((card) => {
+      const tagClass = leadServiceTagClass(card.service);
+      const chipClass = card.followUpBucket === "overdue" ? "overdue" : "today";
+      const chipLabel = card.followUpBucket === "overdue" ? "Overdue" : "Today";
+      const dueLabel = card.nextFollowUpMs ? formatDateTimeLabel(card.nextFollowUpMs) : "Now";
+      return `
+        <button class="my-work-item" type="button" onclick="openLeadDetail('${escHtmlAttr(card.id)}')">
+          <div class="my-work-item-row">
+            <span class="my-work-item-title">${escHtml(card.title || "Untitled lead")}</span>
+            <span class="my-call-chip ${chipClass}">${chipLabel}</span>
+          </div>
+          <div class="my-work-item-row">
+            <span class="card-tag ${tagClass}">${escHtml(card.service || "Service")}</span>
+            <span class="date-text">${escHtml(dueLabel)}</span>
+          </div>
+          ${card.note ? `<div class="my-work-item-copy">${escHtml(card.note).slice(0, 120)}</div>` : ""}
+        </button>
+      `;
+    }).join("");
+  }
 
   if (!myLeads.length) {
     leadsEl.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">No assigned leads yet.</div>`;
@@ -1885,6 +1953,10 @@ window.closeLeadDetail = function () {
 
 document.getElementById("leadDetailOverlay")?.addEventListener("click", function (e) {
   if (e.target === this) window.closeLeadDetail();
+});
+
+document.getElementById("leadMergeOverlay")?.addEventListener("click", function (e) {
+  if (e.target === this) window.closeLeadMergeAssistant();
 });
 
 // ─── TASKS ────────────────────────────────────────────────────────────────────
@@ -3480,6 +3552,170 @@ window.downloadLeadListCsv = function () {
   a.remove();
   URL.revokeObjectURL(url);
   setLeadListStatus(`Downloaded CSV with ${generatedLeadList.length} leads.`, false);
+};
+
+function findMergeCandidateIds(primaryLeadId) {
+  const primary = currentPipeline.find((card) => card.id === primaryLeadId);
+  if (!primary) return [];
+  const primaryEmail = leadPrimaryEmail(primary);
+  const primaryCompanyKey = normalizeLeadEntityKey(primary?.company || primary?.title || "");
+  return currentPipeline
+    .filter((card) => card.id !== primaryLeadId)
+    .filter((card) => !isPipelineLeadClosed(card))
+    .filter((card) => {
+      const emailMatch = primaryEmail && leadPrimaryEmail(card) === primaryEmail;
+      const companyMatch = primaryCompanyKey.length >= 5
+        && normalizeLeadEntityKey(card?.company || card?.title || "") === primaryCompanyKey;
+      return Boolean(emailMatch || companyMatch);
+    })
+    .map((card) => card.id);
+}
+
+function mergeAssistantLeadRowHtml(card, options = {}) {
+  const roleLabel = options.primary ? "Primary lead" : "Duplicate candidate";
+  const createdMs = requestTimelineMs(card?.createdAt) || pipelineLeadUpdatedMs(card);
+  const followUpMs = leadNextFollowUpMs(card);
+  const followUpBucket = followUpBucketForMs(followUpMs);
+  const followUpLabel = followUpLabelForBucket(followUpBucket, followUpMs);
+  const followClass = followUpBucket === "overdue"
+    ? "lead-followup-overdue"
+    : followUpBucket === "due_today"
+      ? "lead-followup-today"
+      : followUpBucket === "next_7"
+        ? "lead-followup-next"
+        : "lead-followup-later";
+  return `
+    <div class="merge-assist-row${options.primary ? " primary" : ""}">
+      <div class="merge-assist-head">
+        <div>
+          <div class="merge-assist-title">${escHtml(card?.title || "Untitled lead")}</div>
+          <div class="merge-assist-note">${escHtml(card?.company || "No company")} | ${escHtml(card?.contact || "No contact")}</div>
+        </div>
+        <span class="merge-assist-badge">${escHtml(roleLabel)}</span>
+      </div>
+      <div class="merge-assist-note">
+        Stage: ${escHtml(pipelineStatusLabel(card?.status))} | Created: ${escHtml(formatDateTimeLabel(createdMs))} | Follow-up: <span class="lead-followup-chip ${followClass}">${escHtml(followUpLabel)}</span>
+      </div>
+      <div class="merge-assist-note">${assigneeChipHtml(card?.ownerUid, card?.ownerName, "Unassigned")}</div>
+      ${
+        options.primary
+          ? ""
+          : `<div class="merge-assist-actions">
+               <button class="card-btn" type="button" onclick="openLeadDetail('${escHtmlAttr(card?.id || "")}')">Open Lead</button>
+               <button class="card-btn" type="button" onclick="mergeLeadIntoPrimary('${escHtmlAttr(card?.id || "")}')">Merge Into Primary</button>
+             </div>`
+      }
+    </div>
+  `;
+}
+
+window.openLeadMergeAssistant = function (leadId) {
+  const primaryId = String(leadId || "");
+  if (!primaryId) return;
+  const primary = currentPipeline.find((card) => card.id === primaryId);
+  if (!primary) {
+    setLeadListStatus("Could not open merge assistant: lead not found.", true);
+    return;
+  }
+  mergePrimaryLeadId = primaryId;
+  const leadListEntry = generatedLeadList.find((lead) => lead.id === primaryId);
+  const candidateIds = leadListEntry?.mergeMatches?.length
+    ? [...leadListEntry.mergeMatches]
+    : findMergeCandidateIds(primaryId);
+  const candidates = candidateIds
+    .map((id) => currentPipeline.find((card) => card.id === id))
+    .filter(Boolean);
+
+  const body = document.getElementById("leadMergeBody");
+  if (!body) return;
+  body.innerHTML = `
+    <div class="merge-assist-list">
+      ${mergeAssistantLeadRowHtml(primary, { primary: true })}
+      ${
+        candidates.length
+          ? candidates.map((card) => mergeAssistantLeadRowHtml(card, { primary: false })).join("")
+          : `<div class="empty-state" style="padding:14px;font-size:10px">No active duplicate candidates found for this lead.</div>`
+      }
+    </div>
+  `;
+  document.getElementById("leadMergeOverlay")?.classList.add("open");
+};
+
+window.closeLeadMergeAssistant = function () {
+  document.getElementById("leadMergeOverlay")?.classList.remove("open");
+  mergePrimaryLeadId = null;
+};
+
+window.mergeLeadIntoPrimary = async function (secondaryId) {
+  const primaryId = String(mergePrimaryLeadId || "");
+  const dupId = String(secondaryId || "");
+  if (!primaryId || !dupId || primaryId === dupId) return;
+
+  const primary = currentPipeline.find((card) => card.id === primaryId);
+  const secondary = currentPipeline.find((card) => card.id === dupId);
+  if (!primary || !secondary) {
+    setLeadListStatus("Merge failed: lead records could not be found.", true);
+    return;
+  }
+
+  const primaryWasUnassigned = isPipelineLeadUnassigned(primary);
+  const nextOwnerUid = primaryWasUnassigned ? String(secondary.ownerUid || "") : String(primary.ownerUid || "");
+  const nextOwnerName = nextOwnerUid
+    ? resolveTeamUserName(nextOwnerUid, primary.ownerName || secondary.ownerName || "")
+    : String(primary.ownerName || secondary.ownerName || "");
+  const primaryStatus = String(primary.status || "leads");
+  const secondaryStatus = String(secondary.status || "leads");
+  const nextStatus = primaryStatus === "closed" && secondaryStatus !== "closed"
+    ? secondaryStatus
+    : primaryStatus;
+
+  const primaryUpdates = {
+    title: String(primary.title || secondary.title || "Untitled lead"),
+    company: String(primary.company || secondary.company || ""),
+    contact: String(primary.contact || secondary.contact || ""),
+    service: String(primary.service || secondary.service || ""),
+    ownerUid: nextOwnerUid,
+    ownerName: nextOwnerName,
+    status: nextStatus || "leads",
+    note: mergeLeadNoteText(primary.note, secondary.note, secondary.id),
+    updatedAt: serverTimestamp(),
+  };
+
+  const secondaryUpdates = {
+    status: "closed",
+    note: mergeArchivedNoteText(secondary.note, primaryId, primaryUpdates.title),
+    updatedAt: serverTimestamp(),
+  };
+
+  try {
+    await updateDoc(doc(db, "pipeline", primaryId), primaryUpdates);
+    await updateDoc(doc(db, "pipeline", dupId), secondaryUpdates);
+
+    const nowMs = Date.now();
+    currentPipeline = currentPipeline.map((card) => {
+      if (card.id === primaryId) {
+        return { ...card, ...primaryUpdates, updatedAt: nowMs };
+      }
+      if (card.id === dupId) {
+        return { ...card, ...secondaryUpdates, updatedAt: nowMs };
+      }
+      return card;
+    });
+
+    renderPipeline(currentPipeline);
+    setLeadListStatus(`Merged lead #${dupId.slice(0, 6)} into #${primaryId.slice(0, 6)}.`, false);
+    setPipelineRadarNotice("Duplicate lead merged and archived.", false);
+
+    const remainingMatches = findMergeCandidateIds(primaryId);
+    if (remainingMatches.length) {
+      window.openLeadMergeAssistant(primaryId);
+    } else {
+      window.closeLeadMergeAssistant();
+    }
+  } catch (err) {
+    console.error("mergeLeadIntoPrimary:", err);
+    setLeadListStatus("Could not merge leads. Please try again.", true);
+  }
 };
 
 window.claimOldestUnassignedLead = async function () {
