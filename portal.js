@@ -2616,8 +2616,10 @@ function renderTasks(tasks) {
     tr.innerHTML = `
       <td><div class="checkbox ${task.done ? "checked" : ""}" onclick="toggleTask('${task.id}', ${!task.done})"></div></td>
       <td class="task-name-cell">
-        <span class="task-name" title="${escHtmlAttr(taskName)}">${escHtml(taskName)}</span>
-        ${staleBadge}
+        <div class="task-name-wrap">
+          <span class="task-name" title="${escHtmlAttr(taskName)}">${escHtml(taskName)}</span>
+          ${staleBadge}
+        </div>
       </td>
       <td>
         <div class="task-owner-stack">
