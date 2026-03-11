@@ -5,6 +5,35 @@
   },
   "hosting": {
     "public": ".",
+    "headers": [
+      {
+        "source": "/reset-password.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, max-age=0"
+          }
+        ]
+      },
+      {
+        "source": "/reset-password.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, max-age=0"
+          }
+        ]
+      },
+      {
+        "source": "/reset-password.css",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, max-age=0"
+          }
+        ]
+      }
+    ],
     "ignore": [
       "firebase.json",
       "firestore.rules",
