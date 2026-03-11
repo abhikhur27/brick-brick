@@ -717,6 +717,186 @@ body::before {
   color: #f2b6ae;
 }
 
+/* Lead list generator */
+.lead-list-builder {
+  margin-bottom: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.lead-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.lead-list-title {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--silver-bright);
+  margin-bottom: 4px;
+}
+
+.lead-list-subtitle {
+  font-size: 12px;
+  color: var(--silver-dim);
+}
+
+.lead-list-actions {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.lead-list-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.lead-list-filter-group {
+  display: grid;
+  gap: 5px;
+}
+
+.lead-list-filter-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--silver-dim);
+}
+
+.lead-list-filter-grid .form-select,
+.lead-list-filter-grid .form-input {
+  padding: 8px 9px;
+  font-size: 11px;
+}
+
+.lead-list-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.lead-list-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--silver-dim);
+  background: rgba(255,255,255,0.02);
+}
+
+.lead-list-pill strong {
+  color: var(--silver-bright);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.lead-list-status {
+  margin-bottom: 10px;
+  border: 1px solid rgba(88, 214, 141, 0.3);
+  border-radius: 6px;
+  background: rgba(88, 214, 141, 0.08);
+  color: #a9e9c3;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  padding: 7px 10px;
+}
+
+.lead-list-status.is-error {
+  border-color: rgba(236, 112, 99, 0.35);
+  background: rgba(236, 112, 99, 0.08);
+  color: #f2b6ae;
+}
+
+.lead-list-wrap {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(255,255,255,0.01);
+  overflow: auto;
+}
+
+table.lead-list-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table.lead-list-table th {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--silver-dim);
+  text-align: left;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+table.lead-list-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--silver);
+  vertical-align: middle;
+}
+
+table.lead-list-table tr:hover td {
+  background: rgba(255,255,255,0.02);
+}
+
+.lead-list-rank {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--silver-dim);
+}
+
+.lead-list-name {
+  color: var(--white);
+  font-size: 13px;
+}
+
+.lead-list-subtext {
+  margin-top: 3px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: var(--silver-dim);
+  line-height: 1.4;
+}
+
+.lead-list-email {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--silver-bright);
+}
+
+.lead-list-open-btn {
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+table.lead-list-table tr:last-child td {
+  border-bottom: 0;
+}
+
 /* ─── KANBAN ─────────────────────────────────────────────────────────────── */
 .kanban {
   display: grid;
@@ -1735,6 +1915,7 @@ tr.request-row-archived td {
 
 /* ─── RESPONSIVE ─────────────────────────────────────────────────────────── */
 @media (max-width: 1100px) {
+  .lead-list-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .kanban { grid-template-columns: repeat(2, 1fr); }
   .my-work-grid { grid-template-columns: 1fr; }
   .clients-layout { grid-template-columns: 1fr; }
@@ -1752,6 +1933,10 @@ tr.request-row-archived td {
   .top-nav-item { padding: 12px; font-size: 9px; }
   .content { padding: 18px 14px 28px; }
   .pipeline-radar { padding: 12px; }
+  .lead-list-builder { padding: 12px; }
+  .lead-list-actions { width: 100%; }
+  .lead-list-actions .card-btn { flex: 1 1 100%; text-align: center; }
+  .lead-list-filter-grid { grid-template-columns: 1fr; }
   .pipeline-radar-metric { min-width: 0; flex: 1 1 calc(50% - 8px); }
   .pipeline-radar-actions { align-items: stretch; }
   .pipeline-radar-action-btn { width: 100%; text-align: center; }

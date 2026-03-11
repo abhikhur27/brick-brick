@@ -64,6 +64,14 @@ const PIPELINE_STALE_DAYS = 3;
 const PIPELINE_NEW_WINDOW_DAYS = 1;
 const PIPELINE_FOCUS_FILTERS = ["all", "unassigned", "stale", "high_intent"];
 const PIPELINE_HIGH_INTENT_SERVICES = new Set(["AI Workflow", "Website Build", "Automation Ops"]);
+const LEAD_LIST_DEFAULT_FILTERS = {
+  stage: "open",
+  source: "all",
+  owner: "any",
+  timeframe: "30",
+  sort: "priority",
+  limit: 25,
+};
 let showAllLeads = false;
 let teamTimelineExpanded = true;
 let collapsedPipelineCols = new Set();
@@ -73,6 +81,11 @@ let pipelineFocusFilter = "all";
 let pipelineRadarNoticeText = "";
 let pipelineRadarNoticeError = false;
 let pipelineRadarNoticeTimer = null;
+let leadListFilters = { ...LEAD_LIST_DEFAULT_FILTERS };
+let generatedLeadList = [];
+let leadListStatusMessage = "";
+let leadListStatusError = false;
+let leadListStatusTimer = null;
 
 // ─── TASK SORT STATE ─────────────────────────────────────────────────────────
 let taskSortField = "due";     // "due" | "createdAt" | "priority" | "owner" | "done"
@@ -314,6 +327,21 @@ onAuthStateChanged(auth, async (user) => {
     clientsSearchTerm = "";
     hasTaskBackfillRun = false;
     isTaskBackfillRunning = false;
+    pipelineFocusFilter = "all";
+    pipelineRadarNoticeText = "";
+    pipelineRadarNoticeError = false;
+    if (pipelineRadarNoticeTimer) {
+      clearTimeout(pipelineRadarNoticeTimer);
+      pipelineRadarNoticeTimer = null;
+    }
+    leadListFilters = { ...LEAD_LIST_DEFAULT_FILTERS };
+    generatedLeadList = [];
+    leadListStatusMessage = "";
+    leadListStatusError = false;
+    if (leadListStatusTimer) {
+      clearTimeout(leadListStatusTimer);
+      leadListStatusTimer = null;
+    }
     currentManagedUsers = [];
     currentProvisioning = [];
     managedRecordsByKey = new Map();
@@ -817,6 +845,293 @@ function setPipelineRadarNotice(message, isError = false) {
   }
 }
 
+function setLeadListStatus(message, isError = false) {
+  leadListStatusMessage = String(message || "").trim();
+  leadListStatusError = Boolean(isError);
+  if (leadListStatusTimer) {
+    clearTimeout(leadListStatusTimer);
+    leadListStatusTimer = null;
+  }
+  if (leadListStatusMessage) {
+    leadListStatusTimer = setTimeout(() => {
+      leadListStatusMessage = "";
+      leadListStatusError = false;
+      leadListStatusTimer = null;
+      renderLeadListBuilder(currentPipeline);
+    }, 4200);
+  }
+  renderLeadListBuilder(currentPipeline);
+}
+
+function leadSourceKey(card) {
+  const source = String(card?.source || "").trim().toLowerCase();
+  if (!source) return "manual";
+  if (source === "website-contact-form") return "website";
+  if (source.includes("website")) return "website";
+  return "manual";
+}
+
+function leadSourceLabel(card) {
+  const source = String(card?.source || "").trim();
+  if (!source) return "Manual";
+  if (source === "website-contact-form") return "Website Form";
+  return source.replace(/[-_]+/g, " ");
+}
+
+function findEmailInText(value) {
+  const match = String(value || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return match ? String(match[0]).toLowerCase() : "";
+}
+
+function leadPrimaryEmail(card) {
+  const contact = String(card?.contact || "").trim();
+  const fromContact = findEmailInText(contact);
+  if (fromContact) return fromContact;
+  return findEmailInText(card?.note || "");
+}
+
+function leadOwnerLabel(card) {
+  return resolveTeamUserName(card?.ownerUid, card?.ownerName) || "Unassigned";
+}
+
+function leadFollowUpPriorityScore(card) {
+  if (isPipelineLeadClosed(card)) return 0;
+  let score = 0;
+  if (isPipelineLeadStale(card)) score += 35;
+  if (isPipelineLeadUnassigned(card)) score += 25;
+  if (isPipelineLeadHighIntent(card)) score += 20;
+  if (isPipelineLeadNew(card)) score += 10;
+  if (String(card?.status || "") === "proposal") score += 10;
+  if (String(card?.status || "") === "contacted") score += 5;
+  return Math.min(score, 100);
+}
+
+function leadPriorityClass(score) {
+  if (score >= 70) return "p-high";
+  if (score >= 40) return "p-mid";
+  return "p-low";
+}
+
+function leadPriorityLabel(score) {
+  if (score >= 70) return "High";
+  if (score >= 40) return "Mid";
+  return "Low";
+}
+
+function buildGeneratedLeadList(cards) {
+  const allCards = Array.isArray(cards) ? cards : [];
+  const currentUid = String(auth.currentUser?.uid || "");
+  const stageFilter = String(leadListFilters.stage || "open");
+  const sourceFilter = String(leadListFilters.source || "all");
+  const ownerFilter = String(leadListFilters.owner || "any");
+  const timeframeDays = Number(leadListFilters.timeframe || 0);
+  const sortFilter = String(leadListFilters.sort || "priority");
+  const limit = Math.max(1, Math.min(200, Number(leadListFilters.limit || LEAD_LIST_DEFAULT_FILTERS.limit)));
+  const cutoffMs = timeframeDays > 0
+    ? Date.now() - (timeframeDays * 24 * 60 * 60 * 1000)
+    : 0;
+
+  const filtered = allCards.filter((card) => {
+    const status = String(card?.status || "");
+    if (stageFilter === "open" && status === "closed") return false;
+    if (stageFilter !== "open" && stageFilter !== "all" && status !== stageFilter) return false;
+
+    const sourceKey = leadSourceKey(card);
+    if (sourceFilter === "website" && sourceKey !== "website") return false;
+    if (sourceFilter === "manual" && sourceKey !== "manual") return false;
+
+    const ownerUid = String(card?.ownerUid || "");
+    if (ownerFilter === "mine" && ownerUid !== currentUid) return false;
+    if (ownerFilter === "unassigned" && !isPipelineLeadUnassigned(card)) return false;
+    if (ownerFilter === "team" && !isTeamAssignmentUid(ownerUid)) return false;
+
+    if (cutoffMs) {
+      const createdMs = requestTimelineMs(card?.createdAt) || pipelineLeadUpdatedMs(card);
+      if (!createdMs || createdMs < cutoffMs) return false;
+    }
+
+    return true;
+  });
+
+  const list = filtered.map((card) => {
+    const createdMs = requestTimelineMs(card?.createdAt) || pipelineLeadUpdatedMs(card);
+    const updatedMs = pipelineLeadUpdatedMs(card);
+    const priorityScore = leadFollowUpPriorityScore(card);
+    const sourceKey = leadSourceKey(card);
+    const ownerLabel = leadOwnerLabel(card);
+    return {
+      id: String(card?.id || ""),
+      title: String(card?.title || "Untitled lead"),
+      company: String(card?.company || ""),
+      contactLabel: String(card?.contact || "").trim() || "—",
+      email: leadPrimaryEmail(card),
+      stage: String(card?.status || "leads"),
+      stageLabel: pipelineStatusLabel(card?.status),
+      sourceKey,
+      sourceLabel: leadSourceLabel(card),
+      ownerUid: String(card?.ownerUid || ""),
+      ownerName: String(card?.ownerName || ""),
+      ownerLabel,
+      unassigned: isPipelineLeadUnassigned(card),
+      priorityScore,
+      priorityClass: leadPriorityClass(priorityScore),
+      priorityLabel: leadPriorityLabel(priorityScore),
+      createdMs,
+      updatedMs,
+    };
+  });
+
+  list.sort((a, b) => {
+    if (sortFilter === "oldest") return a.createdMs - b.createdMs;
+    if (sortFilter === "newest") return b.createdMs - a.createdMs;
+    if (sortFilter === "updated") return b.updatedMs - a.updatedMs;
+    if (b.priorityScore !== a.priorityScore) return b.priorityScore - a.priorityScore;
+    return a.createdMs - b.createdMs;
+  });
+
+  return list.slice(0, limit);
+}
+
+function renderLeadListBuilder(cards) {
+  const host = document.getElementById("leadListBuilder");
+  if (!host) return;
+
+  const leadList = buildGeneratedLeadList(cards);
+  generatedLeadList = leadList;
+  const uniqueEmails = [...new Set(leadList.map((lead) => lead.email).filter(Boolean))];
+  const websiteCount = leadList.filter((lead) => lead.sourceKey === "website").length;
+  const highPriorityCount = leadList.filter((lead) => lead.priorityScore >= 70).length;
+  const unassignedCount = leadList.filter((lead) => lead.unassigned).length;
+
+  host.innerHTML = `
+    <div class="lead-list-head">
+      <div>
+        <div class="lead-list-title">Lead List Generator</div>
+        <div class="lead-list-subtitle">Build outreach-ready lead lists from inbound and manual pipeline data.</div>
+      </div>
+      <div class="lead-list-actions">
+        <button class="card-btn" type="button" onclick="generateLeadList()">Generate</button>
+        <button class="card-btn" type="button" onclick="copyLeadListEmails()" ${uniqueEmails.length ? "" : "disabled"}>Copy Emails (${uniqueEmails.length})</button>
+        <button class="card-btn" type="button" onclick="downloadLeadListCsv()" ${leadList.length ? "" : "disabled"}>Download CSV</button>
+        <button class="card-btn" type="button" onclick="resetLeadListFilters()">Reset</button>
+      </div>
+    </div>
+
+    <div class="lead-list-filter-grid">
+      <div class="lead-list-filter-group">
+        <label class="lead-list-filter-label">Stage</label>
+        <select class="form-select" onchange="updateLeadListFilter('stage', this.value)">
+          <option value="open" ${leadListFilters.stage === "open" ? "selected" : ""}>Open Stages</option>
+          <option value="all" ${leadListFilters.stage === "all" ? "selected" : ""}>All Stages</option>
+          <option value="leads" ${leadListFilters.stage === "leads" ? "selected" : ""}>Leads</option>
+          <option value="contacted" ${leadListFilters.stage === "contacted" ? "selected" : ""}>In Conversation</option>
+          <option value="proposal" ${leadListFilters.stage === "proposal" ? "selected" : ""}>Proposal Sent</option>
+          <option value="closed" ${leadListFilters.stage === "closed" ? "selected" : ""}>Closed</option>
+        </select>
+      </div>
+      <div class="lead-list-filter-group">
+        <label class="lead-list-filter-label">Source</label>
+        <select class="form-select" onchange="updateLeadListFilter('source', this.value)">
+          <option value="all" ${leadListFilters.source === "all" ? "selected" : ""}>All Sources</option>
+          <option value="website" ${leadListFilters.source === "website" ? "selected" : ""}>Website Form</option>
+          <option value="manual" ${leadListFilters.source === "manual" ? "selected" : ""}>Manual / Team Added</option>
+        </select>
+      </div>
+      <div class="lead-list-filter-group">
+        <label class="lead-list-filter-label">Owner</label>
+        <select class="form-select" onchange="updateLeadListFilter('owner', this.value)">
+          <option value="any" ${leadListFilters.owner === "any" ? "selected" : ""}>Any Owner</option>
+          <option value="mine" ${leadListFilters.owner === "mine" ? "selected" : ""}>Assigned to Me</option>
+          <option value="unassigned" ${leadListFilters.owner === "unassigned" ? "selected" : ""}>Unassigned</option>
+          <option value="team" ${leadListFilters.owner === "team" ? "selected" : ""}>Entire Team</option>
+        </select>
+      </div>
+      <div class="lead-list-filter-group">
+        <label class="lead-list-filter-label">Timeframe</label>
+        <select class="form-select" onchange="updateLeadListFilter('timeframe', this.value)">
+          <option value="0" ${String(leadListFilters.timeframe) === "0" ? "selected" : ""}>All Time</option>
+          <option value="7" ${String(leadListFilters.timeframe) === "7" ? "selected" : ""}>Last 7 Days</option>
+          <option value="30" ${String(leadListFilters.timeframe) === "30" ? "selected" : ""}>Last 30 Days</option>
+          <option value="90" ${String(leadListFilters.timeframe) === "90" ? "selected" : ""}>Last 90 Days</option>
+        </select>
+      </div>
+      <div class="lead-list-filter-group">
+        <label class="lead-list-filter-label">Sort</label>
+        <select class="form-select" onchange="updateLeadListFilter('sort', this.value)">
+          <option value="priority" ${leadListFilters.sort === "priority" ? "selected" : ""}>Follow-up Priority</option>
+          <option value="newest" ${leadListFilters.sort === "newest" ? "selected" : ""}>Newest First</option>
+          <option value="oldest" ${leadListFilters.sort === "oldest" ? "selected" : ""}>Oldest First</option>
+          <option value="updated" ${leadListFilters.sort === "updated" ? "selected" : ""}>Recently Updated</option>
+        </select>
+      </div>
+      <div class="lead-list-filter-group">
+        <label class="lead-list-filter-label">Limit</label>
+        <input class="form-input" type="number" min="1" max="200" value="${escHtmlAttr(leadListFilters.limit)}" onchange="updateLeadListFilter('limit', this.value)">
+      </div>
+    </div>
+
+    <div class="lead-list-metrics">
+      <span class="lead-list-pill">Results <strong>${leadList.length}</strong></span>
+      <span class="lead-list-pill">Website <strong>${websiteCount}</strong></span>
+      <span class="lead-list-pill">Priority High <strong>${highPriorityCount}</strong></span>
+      <span class="lead-list-pill">Unassigned <strong>${unassignedCount}</strong></span>
+    </div>
+
+    ${
+      leadListStatusMessage
+        ? `<div class="lead-list-status${leadListStatusError ? " is-error" : ""}">${escHtml(leadListStatusMessage)}</div>`
+        : ""
+    }
+
+    <div class="lead-list-wrap">
+      ${
+        leadList.length
+          ? `<table class="lead-list-table">
+               <thead>
+                 <tr>
+                   <th>#</th>
+                   <th>Lead</th>
+                   <th>Contact</th>
+                   <th>Stage</th>
+                   <th>Source</th>
+                   <th>Owner</th>
+                   <th>Priority</th>
+                   <th>Created</th>
+                   <th></th>
+                 </tr>
+               </thead>
+               <tbody>
+                 ${leadList.map((lead, index) => `
+                   <tr>
+                     <td class="lead-list-rank">${index + 1}</td>
+                     <td>
+                       <div class="lead-list-name">${escHtml(lead.title)}</div>
+                       ${lead.company ? `<div class="lead-list-subtext">${escHtml(lead.company)}</div>` : ""}
+                     </td>
+                     <td>
+                       <div>${escHtml(lead.contactLabel)}</div>
+                       ${
+                         lead.email
+                           ? `<div class="lead-list-email">${escHtml(lead.email)}</div>`
+                           : `<div class="lead-list-subtext">No email detected</div>`
+                       }
+                     </td>
+                     <td><span class="timeline-chip">${escHtml(lead.stageLabel)}</span></td>
+                     <td><div class="lead-list-subtext">${escHtml(lead.sourceLabel)}</div></td>
+                     <td>${assigneeChipHtml(lead.ownerUid, lead.ownerName, "Unassigned")}</td>
+                     <td><span class="priority ${lead.priorityClass}">${escHtml(lead.priorityLabel)}</span></td>
+                     <td class="date-text">${escHtml(formatDateTimeLabel(lead.createdMs))}</td>
+                     <td><button class="card-btn lead-list-open-btn" type="button" onclick="openLeadDetail('${escHtmlAttr(lead.id)}')">Open</button></td>
+                   </tr>
+                 `).join("")}
+               </tbody>
+             </table>`
+          : `<div class="empty-state" style="padding:14px;font-size:10px">No leads match current filters. Adjust filters and generate again.</div>`
+      }
+    </div>
+  `;
+}
+
 function renderPipelineRadar(cards, visibleCards) {
   const radar = document.getElementById("pipelineRadar");
   if (!radar) return;
@@ -1120,6 +1435,7 @@ function renderPipeline(cards) {
     ? allCards
     : allCards.filter((card) => pipelineLeadMatchesFocus(card, pipelineFocusFilter));
 
+  renderLeadListBuilder(allCards);
   renderPipelineRadar(allCards, scopedCards);
   board.innerHTML = "";
 
@@ -2802,6 +3118,131 @@ window.setPipelineFocusFilter = function (nextFilter) {
     pipelineFocusFilter = normalized;
   }
   renderPipeline(currentPipeline);
+};
+
+window.updateLeadListFilter = function (field, rawValue) {
+  const key = String(field || "").trim();
+  if (!key) return;
+  if (key === "limit") {
+    const nextLimit = Math.max(1, Math.min(200, Number(rawValue || LEAD_LIST_DEFAULT_FILTERS.limit)));
+    leadListFilters.limit = Number.isFinite(nextLimit) ? nextLimit : LEAD_LIST_DEFAULT_FILTERS.limit;
+  } else {
+    leadListFilters[key] = String(rawValue || "");
+  }
+  renderLeadListBuilder(currentPipeline);
+};
+
+window.resetLeadListFilters = function () {
+  leadListFilters = { ...LEAD_LIST_DEFAULT_FILTERS };
+  setLeadListStatus("Lead list filters reset.", false);
+};
+
+window.generateLeadList = function () {
+  renderLeadListBuilder(currentPipeline);
+  setLeadListStatus(`Generated ${generatedLeadList.length} leads.`, false);
+};
+
+window.applyLeadListPreset = function (presetKey) {
+  const key = String(presetKey || "");
+  if (key === "website_inbound") {
+    leadListFilters = {
+      ...LEAD_LIST_DEFAULT_FILTERS,
+      stage: "open",
+      source: "website",
+      owner: "any",
+      timeframe: "30",
+      sort: "newest",
+      limit: 50,
+    };
+    setLeadListStatus("Preset loaded: website inbound leads (30 days).", false);
+    return;
+  }
+  if (key === "follow_up_queue") {
+    leadListFilters = {
+      ...LEAD_LIST_DEFAULT_FILTERS,
+      stage: "open",
+      source: "all",
+      owner: "unassigned",
+      timeframe: "30",
+      sort: "priority",
+      limit: 25,
+    };
+    setLeadListStatus("Preset loaded: unassigned follow-up queue.", false);
+    return;
+  }
+  setLeadListStatus("Unknown lead-list preset.", true);
+};
+
+window.copyLeadListEmails = async function () {
+  const emails = [...new Set(generatedLeadList.map((lead) => lead.email).filter(Boolean))];
+  if (!emails.length) {
+    setLeadListStatus("No emails found in the current lead list.", true);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(emails.join(", "));
+    setLeadListStatus(`Copied ${emails.length} emails to clipboard.`, false);
+  } catch (err) {
+    console.error("copyLeadListEmails:", err);
+    setLeadListStatus("Clipboard access was blocked. Use CSV export instead.", true);
+  }
+};
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+window.downloadLeadListCsv = function () {
+  if (!generatedLeadList.length) {
+    setLeadListStatus("No leads available to export.", true);
+    return;
+  }
+  const header = [
+    "Rank",
+    "Lead",
+    "Company",
+    "Contact",
+    "Email",
+    "Stage",
+    "Source",
+    "Owner",
+    "Priority",
+    "PriorityScore",
+    "CreatedAt",
+    "UpdatedAt",
+    "LeadId",
+  ];
+  const rows = generatedLeadList.map((lead, index) => [
+    index + 1,
+    lead.title,
+    lead.company,
+    lead.contactLabel,
+    lead.email,
+    lead.stageLabel,
+    lead.sourceLabel,
+    lead.ownerLabel,
+    lead.priorityLabel,
+    lead.priorityScore,
+    formatDateTimeLabel(lead.createdMs),
+    formatDateTimeLabel(lead.updatedMs),
+    lead.id,
+  ]);
+  const csv = [header, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `lead-list-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  setLeadListStatus(`Downloaded CSV with ${generatedLeadList.length} leads.`, false);
 };
 
 window.claimOldestUnassignedLead = async function () {

@@ -87,6 +87,16 @@ function setPipelineRadarFilter(filter, toastLabel) {
   if (toastLabel) showToast(toastLabel);
 }
 
+function applyLeadListPreset(preset, toastLabel) {
+  gotoPage("pipeline");
+  if (typeof window.applyLeadListPreset !== "function") {
+    showToast("Lead list generator is unavailable.");
+    return;
+  }
+  window.applyLeadListPreset(preset);
+  if (toastLabel) showToast(toastLabel);
+}
+
 function makeActions() {
   return [
     {
@@ -137,6 +147,20 @@ function makeActions() {
           showToast("Claim action unavailable.");
         }
       }),
+    },
+    {
+      id: "lead_list_follow_up_queue",
+      label: "Lead List: Follow-up Queue",
+      hint: "Generator",
+      keywords: "lead list generator queue unassigned stale",
+      run: () => runWhenWorkspaceReady(() => applyLeadListPreset("follow_up_queue", "Lead list preset: follow-up queue.")),
+    },
+    {
+      id: "lead_list_website_inbound",
+      label: "Lead List: Website Inbound (30d)",
+      hint: "Generator",
+      keywords: "lead list website inbound contact form",
+      run: () => runWhenWorkspaceReady(() => applyLeadListPreset("website_inbound", "Lead list preset: website inbound.")),
     },
     {
       id: "go_messages_requests",
