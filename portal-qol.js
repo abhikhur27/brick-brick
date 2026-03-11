@@ -77,6 +77,16 @@ function gotoMessagesRequests() {
   });
 }
 
+function setPipelineRadarFilter(filter, toastLabel) {
+  gotoPage("pipeline");
+  if (typeof window.setPipelineFocusFilter !== "function") {
+    showToast("Pipeline radar filters are unavailable.");
+    return;
+  }
+  window.setPipelineFocusFilter(filter);
+  if (toastLabel) showToast(toastLabel);
+}
+
 function makeActions() {
   return [
     {
@@ -85,6 +95,34 @@ function makeActions() {
       hint: "G, P",
       keywords: "pipeline leads sales",
       run: () => runWhenWorkspaceReady(() => gotoPage("pipeline")),
+    },
+    {
+      id: "pipeline_focus_stale",
+      label: "Pipeline Focus: Stale Leads",
+      hint: "Radar",
+      keywords: "pipeline stale follow up aging leads",
+      run: () => runWhenWorkspaceReady(() => setPipelineRadarFilter("stale", "Pipeline focus set: stale leads.")),
+    },
+    {
+      id: "pipeline_focus_unassigned",
+      label: "Pipeline Focus: Unassigned",
+      hint: "Radar",
+      keywords: "pipeline unassigned owner handoff",
+      run: () => runWhenWorkspaceReady(() => setPipelineRadarFilter("unassigned", "Pipeline focus set: unassigned leads.")),
+    },
+    {
+      id: "pipeline_focus_high_intent",
+      label: "Pipeline Focus: High Intent",
+      hint: "Radar",
+      keywords: "pipeline high intent proposal conversation",
+      run: () => runWhenWorkspaceReady(() => setPipelineRadarFilter("high_intent", "Pipeline focus set: high intent.")),
+    },
+    {
+      id: "pipeline_focus_clear",
+      label: "Pipeline Focus: Clear Filter",
+      hint: "Radar",
+      keywords: "pipeline clear reset radar filter",
+      run: () => runWhenWorkspaceReady(() => setPipelineRadarFilter("all", "Pipeline focus cleared.")),
     },
     {
       id: "go_messages_requests",

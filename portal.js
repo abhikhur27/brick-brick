@@ -60,11 +60,16 @@ let showCompletedMyTasks = false;
 let clientsSearchTerm = "";
 const LEADS_VISIBLE_LIMIT = 10;
 const TASK_STALE_DAYS = 7;
+const PIPELINE_STALE_DAYS = 3;
+const PIPELINE_NEW_WINDOW_DAYS = 1;
+const PIPELINE_FOCUS_FILTERS = ["all", "unassigned", "stale", "high_intent"];
+const PIPELINE_HIGH_INTENT_SERVICES = new Set(["AI Workflow", "Website Build", "Automation Ops"]);
 let showAllLeads = false;
 let teamTimelineExpanded = true;
 let collapsedPipelineCols = new Set();
 let hasTaskBackfillRun = false;
 let isTaskBackfillRunning = false;
+let pipelineFocusFilter = "all";
 
 // ─── TASK SORT STATE ─────────────────────────────────────────────────────────
 let taskSortField = "due";     // "due" | "createdAt" | "priority" | "owner" | "done"
@@ -726,6 +731,124 @@ function pipelineStatusLabel(status) {
   return found ? found.label : "Lead";
 }
 
+function pipelineLeadUpdatedMs(card) {
+  return requestTimelineMs(card?.updatedAt) || requestTimelineMs(card?.createdAt);
+}
+
+function isPipelineLeadClosed(card) {
+  return String(card?.status || "") === "closed";
+}
+
+function isPipelineLeadUnassigned(card) {
+  const ownerUid = String(card?.ownerUid || "");
+  const ownerName = String(card?.ownerName || "").trim().toLowerCase();
+  if (isTeamAssignmentUid(ownerUid)) return true;
+  if (!ownerUid && !ownerName) return true;
+  if (!ownerUid && (ownerName === "team" || ownerName === "entire team" || ownerName === "all team")) return true;
+  return false;
+}
+
+function isPipelineLeadStale(card) {
+  if (isPipelineLeadClosed(card)) return false;
+  const updatedMs = pipelineLeadUpdatedMs(card);
+  if (!updatedMs) return false;
+  const staleCutoffMs = Date.now() - (PIPELINE_STALE_DAYS * 24 * 60 * 60 * 1000);
+  return updatedMs < staleCutoffMs;
+}
+
+function isPipelineLeadNew(card) {
+  if (isPipelineLeadClosed(card)) return false;
+  const createdMs = requestTimelineMs(card?.createdAt) || pipelineLeadUpdatedMs(card);
+  if (!createdMs) return false;
+  const freshCutoffMs = Date.now() - (PIPELINE_NEW_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  return createdMs >= freshCutoffMs;
+}
+
+function isPipelineLeadHighIntent(card) {
+  if (isPipelineLeadClosed(card)) return false;
+  const status = String(card?.status || "");
+  if (status === "contacted" || status === "proposal") return true;
+  const service = String(card?.service || "").trim();
+  return PIPELINE_HIGH_INTENT_SERVICES.has(service);
+}
+
+function pipelineLeadMatchesFocus(card, focus = pipelineFocusFilter) {
+  const normalizedFocus = String(focus || "all");
+  if (normalizedFocus === "unassigned") return !isPipelineLeadClosed(card) && isPipelineLeadUnassigned(card);
+  if (normalizedFocus === "stale") return isPipelineLeadStale(card);
+  if (normalizedFocus === "high_intent") return isPipelineLeadHighIntent(card);
+  return true;
+}
+
+function pipelineFocusLabel(focus) {
+  if (focus === "unassigned") return "Unassigned";
+  if (focus === "stale") return `Stale (${PIPELINE_STALE_DAYS}+ days)`;
+  if (focus === "high_intent") return "High Intent";
+  return "All Leads";
+}
+
+function renderPipelineRadar(cards, visibleCards) {
+  const radar = document.getElementById("pipelineRadar");
+  if (!radar) return;
+
+  const allCards = Array.isArray(cards) ? cards : [];
+  const scopedCards = Array.isArray(visibleCards) ? visibleCards : allCards;
+  const openCards = allCards.filter((card) => !isPipelineLeadClosed(card));
+  const filterButtons = [
+    { key: "all", label: "All", count: allCards.length },
+    { key: "unassigned", label: "Unassigned", count: openCards.filter(isPipelineLeadUnassigned).length },
+    { key: "stale", label: "Stale", count: openCards.filter(isPipelineLeadStale).length },
+    { key: "high_intent", label: "High Intent", count: openCards.filter(isPipelineLeadHighIntent).length },
+  ];
+  const newLeadCount = openCards
+    .filter((card) => String(card.status || "") === "leads")
+    .filter(isPipelineLeadNew)
+    .length;
+  const attentionCount = openCards.filter((card) =>
+    isPipelineLeadUnassigned(card) || isPipelineLeadStale(card)
+  ).length;
+
+  radar.innerHTML = `
+    <div class="pipeline-radar-head">
+      <div>
+        <div class="pipeline-radar-title">Pipeline Follow-Up Radar</div>
+        <div class="pipeline-radar-subtitle">Prioritize outreach and keep high-value leads moving.</div>
+      </div>
+      <div class="pipeline-radar-metrics">
+        <div class="pipeline-radar-metric">
+          <span class="pipeline-radar-metric-label">Needs Attention</span>
+          <span class="pipeline-radar-metric-value">${attentionCount}</span>
+        </div>
+        <div class="pipeline-radar-metric">
+          <span class="pipeline-radar-metric-label">New (${PIPELINE_NEW_WINDOW_DAYS}d)</span>
+          <span class="pipeline-radar-metric-value">${newLeadCount}</span>
+        </div>
+      </div>
+    </div>
+    <div class="pipeline-radar-filters">
+      ${filterButtons.map((filter) => `
+        <button
+          type="button"
+          class="pipeline-focus-chip${pipelineFocusFilter === filter.key ? " active" : ""}"
+          onclick="setPipelineFocusFilter('${filter.key}')"
+          aria-pressed="${pipelineFocusFilter === filter.key ? "true" : "false"}"
+        >
+          <span>${filter.label}</span>
+          <strong>${filter.count}</strong>
+        </button>
+      `).join("")}
+    </div>
+    ${
+      pipelineFocusFilter !== "all"
+        ? `<div class="pipeline-radar-active">
+             Showing ${scopedCards.length} / ${allCards.length} leads for: <strong>${escHtml(pipelineFocusLabel(pipelineFocusFilter))}</strong>
+             <button type="button" class="pipeline-radar-clear" onclick="setPipelineFocusFilter('all')">Clear filter</button>
+           </div>`
+        : ""
+    }
+  `;
+}
+
 function renderMyWorkDashboard() {
   const summaryEl = document.getElementById("myWorkSummary");
   const leadsEl = document.getElementById("myLeadsList");
@@ -939,10 +1062,16 @@ window.toggleMyWorkTaskDone = async function (evt, id, newDone) {
 function renderPipeline(cards) {
   const board = document.getElementById("kanbanBoard");
   if (!board) return;
+  const allCards = Array.isArray(cards) ? cards : [];
+  const scopedCards = pipelineFocusFilter === "all"
+    ? allCards
+    : allCards.filter((card) => pipelineLeadMatchesFocus(card, pipelineFocusFilter));
+
+  renderPipelineRadar(allCards, scopedCards);
   board.innerHTML = "";
 
   COLS.forEach(({ key, label }) => {
-    let colCards = cards.filter((c) => c.status === key);
+    let colCards = scopedCards.filter((c) => c.status === key);
     if (key === "leads") {
       colCards = [...colCards].sort((a, b) => {
         const ams = requestTimelineMs(a.createdAt) || requestTimelineMs(a.updatedAt);
@@ -2607,6 +2736,18 @@ window.togglePipelineColumnCollapse = function (key) {
 
 window.toggleLeadOverflow = function () {
   showAllLeads = !showAllLeads;
+  renderPipeline(currentPipeline);
+};
+
+window.setPipelineFocusFilter = function (nextFilter) {
+  const normalized = PIPELINE_FOCUS_FILTERS.includes(String(nextFilter || ""))
+    ? String(nextFilter || "")
+    : "all";
+  if (pipelineFocusFilter === normalized && normalized !== "all") {
+    pipelineFocusFilter = "all";
+  } else {
+    pipelineFocusFilter = normalized;
+  }
   renderPipeline(currentPipeline);
 };
 
