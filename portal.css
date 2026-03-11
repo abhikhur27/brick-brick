@@ -741,6 +741,87 @@ body::before {
   color: #f2b6ae;
 }
 
+.sales-brief-queue {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  padding: 10px;
+}
+
+.sales-brief-head {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.sales-brief-title {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--silver-bright);
+}
+
+.sales-brief-subtitle {
+  font-size: 11px;
+  color: var(--silver-dim);
+}
+
+.sales-brief-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sales-brief-card {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface2);
+  padding: 10px;
+}
+
+.sales-brief-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sales-brief-card-title {
+  font-size: 13px;
+  color: var(--white);
+}
+
+.sales-brief-meta {
+  margin-top: 4px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--silver-dim);
+}
+
+.sales-brief-summary {
+  margin-top: 7px;
+  font-size: 12px;
+  color: var(--silver);
+  line-height: 1.5;
+}
+
+.sales-brief-angle {
+  margin-top: 7px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--silver-dim);
+  line-height: 1.45;
+}
+
+.sales-brief-actions {
+  margin-top: 9px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 /* Lead list generator */
 .lead-list-builder {
   margin-bottom: 12px;
@@ -831,6 +912,67 @@ body::before {
   color: var(--silver-bright);
   font-size: 10px;
   letter-spacing: 0;
+}
+
+.lead-research-panel {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255,255,255,0.015);
+}
+
+.lead-research-guardrail {
+  margin-bottom: 10px;
+  border: 1px solid rgba(184,168,120,0.3);
+  border-radius: 6px;
+  background: rgba(184,168,120,0.08);
+  color: var(--gold);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  padding: 7px 9px;
+}
+
+.lead-research-table td {
+  vertical-align: top;
+}
+
+.research-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.research-status-pending {
+  color: var(--gold);
+  border-color: rgba(184,168,120,0.35);
+  background: rgba(184,168,120,0.12);
+}
+
+.research-status-approved {
+  color: var(--blue-soft);
+  border-color: rgba(93,173,226,0.35);
+  background: rgba(93,173,226,0.1);
+}
+
+.research-status-imported {
+  color: var(--green-soft);
+  border-color: rgba(88,214,141,0.35);
+  background: rgba(88,214,141,0.1);
+}
+
+.research-status-rejected {
+  color: var(--red-soft);
+  border-color: rgba(236,112,99,0.35);
+  background: rgba(236,112,99,0.1);
 }
 
 .lead-list-status {
@@ -2090,8 +2232,10 @@ tr.request-row-archived td {
   .content { padding: 18px 14px 28px; }
   .pipeline-radar { padding: 12px; }
   .lead-list-builder { padding: 12px; }
+  .lead-research-panel { padding: 10px; }
   .lead-list-actions { width: 100%; }
   .lead-list-actions .card-btn { flex: 1 1 100%; text-align: center; }
+  .sales-brief-grid { grid-template-columns: 1fr; }
   .lead-list-filter-grid { grid-template-columns: 1fr; }
   .pipeline-radar-metric { min-width: 0; flex: 1 1 calc(50% - 8px); }
   .pipeline-radar-actions { align-items: stretch; }

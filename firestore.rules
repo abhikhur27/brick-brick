@@ -269,6 +269,10 @@ service cloud.firestore {
       allow create: if isAdmin() || isPublicPipelineLeadCreate();
     }
 
+    match /lead_research_imports/{docId} {
+      allow read, write: if isAdmin();
+    }
+
     match /tasks/{docId} {
       allow read, write: if isAdmin();
     }

@@ -85,6 +85,14 @@ function gotoMyCalls() {
   });
 }
 
+function gotoLeadResearchQueue() {
+  gotoPage("pipeline");
+  window.requestAnimationFrame(() => {
+    const queue = document.getElementById("leadResearchQueue");
+    queue?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
 function setPipelineRadarFilter(filter, toastLabel) {
   gotoPage("pipeline");
   if (typeof window.setPipelineFocusFilter !== "function") {
@@ -183,6 +191,13 @@ function makeActions() {
       hint: "Generator",
       keywords: "lead list duplicates merge review",
       run: () => runWhenWorkspaceReady(() => applyLeadListPreset("duplicates_review", "Lead list preset: duplicates review.")),
+    },
+    {
+      id: "go_lead_research_queue",
+      label: "Go to Research Queue",
+      hint: "Pipeline",
+      keywords: "lead research queue csv imports staged",
+      run: () => runWhenWorkspaceReady(() => gotoLeadResearchQueue()),
     },
     {
       id: "go_messages_requests",

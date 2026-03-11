@@ -88,6 +88,23 @@ let generatedLeadList = [];
 let leadListStatusMessage = "";
 let leadListStatusError = false;
 let leadListStatusTimer = null;
+let currentLeadResearchImports = [];
+let leadResearchStatusMessage = "";
+let leadResearchStatusError = false;
+let leadResearchStatusTimer = null;
+const LEAD_RESEARCH_ROW_LIMIT = 150;
+const LEAD_RESEARCH_BLOCKED_HEADERS = [
+  "ssn",
+  "socialsecurity",
+  "creditcard",
+  "cardnumber",
+  "dateofbirth",
+  "dob",
+  "bankaccount",
+  "routingnumber",
+  "driverslicense",
+  "passportnumber",
+];
 
 // ─── TASK SORT STATE ─────────────────────────────────────────────────────────
 let taskSortField = "due";     // "due" | "createdAt" | "priority" | "owner" | "done"
@@ -103,6 +120,7 @@ let unsubClientFlow = null;
 let unsubTeamUsers = null;
 let unsubUsers = null;
 let unsubProvisioning = null;
+let unsubLeadResearchImports = null;
 
 // ─── MODAL STATE ─────────────────────────────────────────────────────────────
 let modalMode    = "pipeline";
@@ -347,6 +365,13 @@ onAuthStateChanged(auth, async (user) => {
       clearTimeout(leadListStatusTimer);
       leadListStatusTimer = null;
     }
+    currentLeadResearchImports = [];
+    leadResearchStatusMessage = "";
+    leadResearchStatusError = false;
+    if (leadResearchStatusTimer) {
+      clearTimeout(leadResearchStatusTimer);
+      leadResearchStatusTimer = null;
+    }
     currentManagedUsers = [];
     currentProvisioning = [];
     managedRecordsByKey = new Map();
@@ -479,6 +504,25 @@ function startListeners() {
     (err) => console.error("Client flow error:", err)
   );
 
+  unsubLeadResearchImports = onSnapshot(
+    collection(db, "lead_research_imports"),
+    (snap) => {
+      currentLeadResearchImports = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => {
+          const ams = requestTimelineMs(a.createdAt) || requestTimelineMs(a.updatedAt);
+          const bms = requestTimelineMs(b.createdAt) || requestTimelineMs(b.updatedAt);
+          return bms - ams;
+        });
+      renderLeadListBuilder(currentPipeline);
+    },
+    (err) => {
+      console.error("Lead research imports error:", err);
+      currentLeadResearchImports = [];
+      setLeadResearchStatus("Could not load lead research queue.", true);
+    }
+  );
+
   if (isSuperAdminRole(currentUserRole)) {
     startManagedUserListeners();
   } else {
@@ -536,6 +580,7 @@ function stopRealtimeListeners() {
   if (unsubClients) unsubClients();
   if (unsubClientRequests) unsubClientRequests();
   if (unsubClientFlow) unsubClientFlow();
+  if (unsubLeadResearchImports) unsubLeadResearchImports();
   stopTeamUserListener();
   stopManagedUserListeners();
   unsubPipeline = null;
@@ -544,6 +589,7 @@ function stopRealtimeListeners() {
   unsubClients = null;
   unsubClientRequests = null;
   unsubClientFlow = null;
+  unsubLeadResearchImports = null;
 }
 
 function startManagedUserListeners() {
@@ -868,6 +914,287 @@ function setLeadListStatus(message, isError = false) {
   renderLeadListBuilder(currentPipeline);
 }
 
+function setLeadResearchStatus(message, isError = false) {
+  leadResearchStatusMessage = String(message || "").trim();
+  leadResearchStatusError = Boolean(isError);
+  if (leadResearchStatusTimer) {
+    clearTimeout(leadResearchStatusTimer);
+    leadResearchStatusTimer = null;
+  }
+  if (leadResearchStatusMessage) {
+    leadResearchStatusTimer = setTimeout(() => {
+      leadResearchStatusMessage = "";
+      leadResearchStatusError = false;
+      leadResearchStatusTimer = null;
+      renderLeadListBuilder(currentPipeline);
+    }, 4600);
+  }
+  renderLeadListBuilder(currentPipeline);
+}
+
+function textHasAnyKeywords(text, keywords = []) {
+  const hay = String(text || "").toLowerCase();
+  if (!hay) return false;
+  return keywords.some((keyword) => hay.includes(String(keyword || "").toLowerCase()));
+}
+
+function normalizeSalesBriefService(service, text) {
+  const direct = String(service || "").trim();
+  if (direct && direct.toLowerCase() !== "other") return direct;
+
+  if (textHasAnyKeywords(text, ["chatbot", "assistant", "gpt", "ai", "llm"])) {
+    return "AI Workflow";
+  }
+  if (textHasAnyKeywords(text, ["automation", "workflow", "zapier", "integration", "crm", "manual process"])) {
+    return "Automation Ops";
+  }
+  if (textHasAnyKeywords(text, ["website", "landing", "redesign", "seo", "wordpress", "shopify"])) {
+    return "Website Build";
+  }
+  if (textHasAnyKeywords(text, ["ads", "ppc", "google ads", "meta ads"])) {
+    return "Paid Ads";
+  }
+  if (textHasAnyKeywords(text, ["content", "blog", "copywriting", "social"])) {
+    return "SEO / Content";
+  }
+  return "Website Build";
+}
+
+function salesBriefNeedsByService(service) {
+  const map = {
+    "AI Workflow": [
+      "AI assistant use-case mapping",
+      "workflow automation blueprint",
+      "handoff documentation and owner training",
+    ],
+    "Website Build": [
+      "conversion-focused page structure",
+      "faster mobile experience",
+      "lead capture and follow-up hooks",
+    ],
+    "Automation Ops": [
+      "manual-step audit",
+      "workflow automations with fail-safes",
+      "operations visibility dashboard",
+    ],
+    "SEO / Content": [
+      "high-intent content plan",
+      "technical SEO baseline cleanup",
+      "monthly ranking and lead reporting",
+    ],
+    "Paid Ads": [
+      "campaign tracking setup",
+      "landing page and offer alignment",
+      "budget pacing and lead quality monitoring",
+    ],
+    "Brand / Creative": [
+      "brand positioning refresh",
+      "conversion-aligned messaging",
+      "creative consistency across channels",
+    ],
+  };
+  return map[service] || [
+    "discovery call and current-state audit",
+    "service-fit recommendation",
+    "implementation plan with clear handoff",
+  ];
+}
+
+function salesBriefOpportunityClass(tier) {
+  if (tier === "high") return "p-high";
+  if (tier === "mid") return "p-mid";
+  return "p-low";
+}
+
+function salesBriefOpportunityLabel(tier) {
+  if (tier === "high") return "High";
+  if (tier === "mid") return "Mid";
+  return "Low";
+}
+
+function buildLeadSalesBrief(card = {}) {
+  const title = String(card?.title || "").trim();
+  const company = String(card?.company || "").trim();
+  const contact = String(card?.contact || "").trim();
+  const note = String(card?.note || "").trim();
+  const source = String(card?.source || "").trim().toLowerCase();
+  const status = String(card?.status || "leads").trim().toLowerCase();
+  const combinedText = `${title}\n${company}\n${contact}\n${note}`;
+  const recommendedService = normalizeSalesBriefService(card?.service, combinedText);
+  const likelyNeeds = salesBriefNeedsByService(recommendedService);
+
+  let score = 18;
+  if (source.includes("website")) score += 16;
+  if (status === "contacted") score += 12;
+  if (status === "proposal") score += 18;
+  if (textHasAnyKeywords(combinedText, ["urgent", "asap", "immediately", "this week"])) score += 22;
+  if (textHasAnyKeywords(combinedText, ["quote", "budget", "pricing", "proposal"])) score += 12;
+  if (textHasAnyKeywords(combinedText, ["manual", "bottleneck", "slow", "messy process"])) score += 10;
+  if (company) score += 5;
+  if (findEmailInText(contact) || findEmailInText(note)) score += 7;
+  if (/\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/.test(`${contact} ${note}`)) score += 5;
+  if (note.length >= 140) score += 5;
+  score = Math.min(100, Math.max(0, score));
+
+  const opportunityTier = score >= 68 ? "high" : score >= 42 ? "mid" : "low";
+  const outreachAngle = opportunityTier === "high"
+    ? "Reach out same day with two clear options and propose a 20-minute scoping call."
+    : opportunityTier === "mid"
+      ? "Send a focused discovery checklist and a short call booking link."
+      : "Lead with a quick audit offer and add to nurture follow-up if no reply.";
+  const summaryEntity = company || title || "this lead";
+  const summary = `${summaryEntity} is a fit for ${recommendedService}. Prioritize ${likelyNeeds[0]}.`;
+
+  return {
+    summary,
+    recommendedService,
+    likelyNeeds,
+    opportunityTier,
+    opportunityLabel: salesBriefOpportunityLabel(opportunityTier),
+    opportunityClass: salesBriefOpportunityClass(opportunityTier),
+    outreachAngle,
+    score,
+  };
+}
+
+function formatSalesBriefText(card, brief) {
+  const entity = String(card?.company || card?.title || "Lead").trim();
+  return [
+    `Sales Brief: ${entity}`,
+    `Recommended Service: ${brief.recommendedService}`,
+    `Opportunity: ${brief.opportunityLabel} (${brief.score}/100)`,
+    `Likely Needs: ${brief.likelyNeeds.join("; ")}`,
+    `Outreach Angle: ${brief.outreachAngle}`,
+    `Summary: ${brief.summary}`,
+  ].join("\n");
+}
+
+function normalizeLeadResearchStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "approved") return "approved";
+  if (normalized === "rejected") return "rejected";
+  if (normalized === "imported") return "imported";
+  return "pending";
+}
+
+function leadResearchStatusLabel(status) {
+  const normalized = normalizeLeadResearchStatus(status);
+  if (normalized === "approved") return "Approved";
+  if (normalized === "rejected") return "Rejected";
+  if (normalized === "imported") return "Imported";
+  return "Pending Review";
+}
+
+function leadResearchStatusClass(status) {
+  return `research-status-${normalizeLeadResearchStatus(status)}`;
+}
+
+function toAbsoluteWebsiteUrl(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  if (value.toLowerCase() === "n/a" || value.toLowerCase() === "na" || value.toLowerCase() === "none") return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  if (!value.includes(".")) return "";
+  return `https://${value.replace(/^\/+/, "")}`;
+}
+
+function normalizeCsvHeader(value) {
+  return String(value || "")
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function parseCsvText(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === "\"") {
+        if (text[i + 1] === "\"") {
+          cell += "\"";
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      inQuotes = true;
+      continue;
+    }
+    if (ch === ",") {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+    if (ch === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+    if (ch === "\r") continue;
+    cell += ch;
+  }
+
+  if (cell.length || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  const cleaned = rows
+    .map((cells) => cells.map((v) => String(v || "").trim()))
+    .filter((cells) => cells.some((v) => v.length));
+  if (!cleaned.length) {
+    return { headers: [], records: [] };
+  }
+
+  const rawHeaders = cleaned[0];
+  const headers = rawHeaders.map((value, idx) => normalizeCsvHeader(value) || `col${idx + 1}`);
+  const records = cleaned.slice(1).map((cells) => {
+    const entry = {};
+    headers.forEach((header, index) => {
+      entry[header] = String(cells[index] || "").trim();
+    });
+    return entry;
+  });
+  return { headers, records };
+}
+
+function pickCsvValue(entry, keys = []) {
+  for (const key of keys) {
+    const normalized = normalizeCsvHeader(key);
+    const value = String(entry?.[normalized] || "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function coerceConfidenceValue(rawValue) {
+  const raw = String(rawValue || "").trim().replace("%", "");
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return 50;
+  return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+function leadResearchCompanyKey(record = {}) {
+  return normalizeLeadEntityKey(record.company || record.title || "");
+}
+
+function leadResearchEmailKey(record = {}) {
+  return normalizeEmail(record.email || "");
+}
+
 function leadSourceKey(card) {
   const source = String(card?.source || "").trim().toLowerCase();
   if (!source) return "manual";
@@ -1157,6 +1484,136 @@ function buildGeneratedLeadList(cards) {
   return list.slice(0, limit);
 }
 
+function leadResearchCandidateFromRecord(record = {}) {
+  return {
+    id: String(record.id || ""),
+    title: String(record.title || record.company || "Untitled lead"),
+    company: String(record.company || ""),
+    contact: [record.contact, record.email, record.phone].filter(Boolean).join(" | "),
+    service: String(record.serviceHint || ""),
+    source: "research-import",
+    status: "leads",
+    note: String(record.note || ""),
+  };
+}
+
+function renderLeadResearchQueueSection() {
+  const imports = Array.isArray(currentLeadResearchImports) ? currentLeadResearchImports : [];
+  const pendingCount = imports.filter((entry) => normalizeLeadResearchStatus(entry.status) === "pending").length;
+  const approvedCount = imports.filter((entry) => normalizeLeadResearchStatus(entry.status) === "approved").length;
+  const importedCount = imports.filter((entry) => normalizeLeadResearchStatus(entry.status) === "imported").length;
+  const rejectedCount = imports.filter((entry) => normalizeLeadResearchStatus(entry.status) === "rejected").length;
+  const rows = imports.slice(0, 40);
+
+  return `
+    <section class="lead-research-panel" id="leadResearchQueue">
+      <div class="lead-list-head">
+        <div>
+          <div class="lead-list-title">Public-Source Lead Research Intake</div>
+          <div class="lead-list-subtitle">CSV imports are staged for review before any lead is pushed into the sales pipeline.</div>
+        </div>
+        <div class="lead-list-actions">
+          <input type="file" id="leadResearchCsvInput" accept=".csv,text/csv" style="display:none" onchange="ingestLeadResearchCsvFile(this)">
+          <button class="card-btn" type="button" onclick="triggerLeadResearchCsvPicker()">Import CSV</button>
+          <button class="card-btn" type="button" onclick="importApprovedResearchLeads()" ${approvedCount ? "" : "disabled"}>Import Approved (${approvedCount})</button>
+          <button class="card-btn" type="button" onclick="clearRejectedResearchLeads()" ${rejectedCount ? "" : "disabled"}>Clear Rejected (${rejectedCount})</button>
+        </div>
+      </div>
+
+      <div class="lead-list-metrics">
+        <span class="lead-list-pill">Staged <strong>${imports.length}</strong></span>
+        <span class="lead-list-pill">Pending <strong>${pendingCount}</strong></span>
+        <span class="lead-list-pill">Approved <strong>${approvedCount}</strong></span>
+        <span class="lead-list-pill">Imported <strong>${importedCount}</strong></span>
+        <span class="lead-list-pill">Rejected <strong>${rejectedCount}</strong></span>
+      </div>
+
+      <div class="lead-research-guardrail">
+        Guardrails: import only publicly available business data with a source URL or source label. Do not upload personal sensitive data.
+      </div>
+
+      ${
+        leadResearchStatusMessage
+          ? `<div class="lead-list-status${leadResearchStatusError ? " is-error" : ""}">${escHtml(leadResearchStatusMessage)}</div>`
+          : ""
+      }
+
+      <div class="lead-list-wrap">
+        ${
+          rows.length
+            ? `<table class="lead-list-table lead-research-table">
+                 <thead>
+                   <tr>
+                     <th>Lead</th>
+                     <th>Source</th>
+                     <th>Confidence</th>
+                     <th>Status</th>
+                     <th>Sales Brief</th>
+                     <th></th>
+                   </tr>
+                 </thead>
+                 <tbody>
+                   ${rows.map((entry) => {
+                     const status = normalizeLeadResearchStatus(entry.status);
+                     const candidate = leadResearchCandidateFromRecord(entry);
+                     const brief = buildLeadSalesBrief(candidate);
+                     const sourceUrl = toAbsoluteWebsiteUrl(entry.publicSourceUrl || entry.sourceUrl || "");
+                     const sourceLabel = String(entry.publicSourceLabel || entry.sourceLabel || "Public directory");
+                     const confidence = coerceConfidenceValue(entry.confidence);
+                     const confidenceClass = confidence >= 70 ? "p-high" : confidence >= 40 ? "p-mid" : "p-low";
+                     return `
+                       <tr>
+                         <td>
+                           <div class="lead-list-name">${escHtml(candidate.title)}</div>
+                           <div class="lead-list-subtext">${escHtml(candidate.company || "No company")} | ${escHtml(entry.email || "No email")}</div>
+                           <div class="lead-list-subtext">${escHtml(entry.note || "No qualification notes")}</div>
+                         </td>
+                         <td>
+                           <div class="lead-list-subtext">${escHtml(sourceLabel)}</div>
+                           ${
+                             sourceUrl
+                               ? `<a class="lead-list-email" href="${escHtmlAttr(sourceUrl)}" target="_blank" rel="noopener noreferrer">Open source</a>`
+                               : `<div class="lead-list-subtext">No source URL</div>`
+                           }
+                         </td>
+                         <td><span class="priority ${confidenceClass}">${confidence}/100</span></td>
+                         <td><span class="research-status ${leadResearchStatusClass(status)}">${leadResearchStatusLabel(status)}</span></td>
+                         <td>
+                           <div class="lead-list-subtext"><strong>${escHtml(brief.recommendedService)}</strong> | ${escHtml(brief.opportunityLabel)} (${brief.score}/100)</div>
+                           <div class="lead-list-subtext">${escHtml(brief.summary)}</div>
+                         </td>
+                         <td>
+                           <div class="merge-assist-actions">
+                             <button class="card-btn" type="button" onclick="copyResearchSalesBrief('${escHtmlAttr(entry.id)}')">Copy Brief</button>
+                             ${
+                               status === "pending"
+                                 ? `<button class="card-btn" type="button" onclick="approveResearchLead('${escHtmlAttr(entry.id)}')">Approve</button>`
+                                 : ""
+                             }
+                             ${
+                               status === "approved"
+                                 ? `<button class="card-btn" type="button" onclick="importResearchLead('${escHtmlAttr(entry.id)}')">Import</button>`
+                                 : ""
+                             }
+                             ${
+                               status === "pending" || status === "approved"
+                                 ? `<button class="card-btn delete" type="button" onclick="rejectResearchLead('${escHtmlAttr(entry.id)}')">Reject</button>`
+                                 : ""
+                             }
+                           </div>
+                         </td>
+                       </tr>
+                     `;
+                   }).join("")}
+                 </tbody>
+               </table>`
+            : `<div class="empty-state" style="padding:14px;font-size:10px">No staged research leads yet. Import a CSV to start a review queue.</div>`
+        }
+      </div>
+    </section>
+  `;
+}
+
 function renderLeadListBuilder(cards) {
   const host = document.getElementById("leadListBuilder");
   if (!host) return;
@@ -1346,6 +1803,61 @@ function renderLeadListBuilder(cards) {
           : `<div class="empty-state" style="padding:14px;font-size:10px">No leads match current filters. Adjust filters and generate again.</div>`
       }
     </div>
+
+    ${renderLeadResearchQueueSection()}
+  `;
+}
+
+function renderInboundSalesBriefQueue(cards) {
+  const inboundCards = (Array.isArray(cards) ? cards : [])
+    .filter((card) => !isPipelineLeadClosed(card))
+    .filter((card) => String(leadSourceKey(card)) === "website")
+    .sort((a, b) => {
+      const ams = requestTimelineMs(a.createdAt) || pipelineLeadUpdatedMs(a);
+      const bms = requestTimelineMs(b.createdAt) || pipelineLeadUpdatedMs(b);
+      return bms - ams;
+    })
+    .slice(0, 4);
+
+  if (!inboundCards.length) {
+    return `
+      <section class="sales-brief-queue">
+        <div class="sales-brief-head">
+          <div class="sales-brief-title">Inbound Sales Brief Queue</div>
+          <div class="sales-brief-subtitle">No recent website-form leads yet.</div>
+        </div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="sales-brief-queue">
+      <div class="sales-brief-head">
+        <div class="sales-brief-title">Inbound Sales Brief Queue</div>
+        <div class="sales-brief-subtitle">Deterministic brief cards for fast first-response consistency.</div>
+      </div>
+      <div class="sales-brief-grid">
+        ${inboundCards.map((card) => {
+          const brief = buildLeadSalesBrief(card);
+          return `
+            <article class="sales-brief-card">
+              <div class="sales-brief-card-head">
+                <div class="sales-brief-card-title">${escHtml(card.title || "Untitled lead")}</div>
+                <span class="priority ${brief.opportunityClass}">${escHtml(brief.opportunityLabel)}</span>
+              </div>
+              <div class="sales-brief-meta">${escHtml(card.company || "No company")} | ${escHtml(brief.recommendedService)}</div>
+              <div class="sales-brief-summary">${escHtml(brief.summary)}</div>
+              <div class="sales-brief-angle">${escHtml(brief.outreachAngle)}</div>
+              <div class="sales-brief-actions">
+                <button class="card-btn" type="button" onclick="copyLeadSalesBrief('${escHtmlAttr(card.id)}')">Copy Brief</button>
+                <button class="card-btn" type="button" onclick="attachSalesBriefToLead('${escHtmlAttr(card.id)}')">Attach to Note</button>
+                <button class="card-btn" type="button" onclick="openLeadDetail('${escHtmlAttr(card.id)}')">Open Lead</button>
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
   `;
 }
 
@@ -1367,6 +1879,7 @@ function renderPipelineRadar(cards, visibleCards) {
     .filter((card) => String(card.status || "") === "leads")
     .filter(isPipelineLeadNew)
     .length;
+  const inboundCount = openCards.filter((card) => leadSourceKey(card) === "website").length;
   const attentionCount = openCards.filter((card) =>
     isPipelineLeadUnassigned(card) || isPipelineLeadStale(card)
   ).length;
@@ -1385,6 +1898,10 @@ function renderPipelineRadar(cards, visibleCards) {
         <div class="pipeline-radar-metric">
           <span class="pipeline-radar-metric-label">New (${PIPELINE_NEW_WINDOW_DAYS}d)</span>
           <span class="pipeline-radar-metric-value">${newLeadCount}</span>
+        </div>
+        <div class="pipeline-radar-metric">
+          <span class="pipeline-radar-metric-label">Inbound</span>
+          <span class="pipeline-radar-metric-value">${inboundCount}</span>
         </div>
       </div>
     </div>
@@ -1431,6 +1948,7 @@ function renderPipelineRadar(cards, visibleCards) {
         ? `<div class="pipeline-radar-notice${pipelineRadarNoticeError ? " is-error" : ""}">${escHtml(pipelineRadarNoticeText)}</div>`
         : ""
     }
+    ${renderInboundSalesBriefQueue(allCards)}
   `;
 }
 
@@ -3385,6 +3903,380 @@ window.setPipelineFocusFilter = function (nextFilter) {
     pipelineFocusFilter = normalized;
   }
   renderPipeline(currentPipeline);
+};
+
+window.copyLeadSalesBrief = async function (leadId) {
+  const id = String(leadId || "");
+  const card = currentPipeline.find((entry) => entry.id === id);
+  if (!card) {
+    setPipelineRadarNotice("Could not copy brief: lead not found.", true);
+    return;
+  }
+  const brief = buildLeadSalesBrief(card);
+  try {
+    await navigator.clipboard.writeText(formatSalesBriefText(card, brief));
+    setPipelineRadarNotice(`Sales brief copied for ${card.title || "lead"}.`, false);
+  } catch (err) {
+    console.error("copyLeadSalesBrief:", err);
+    setPipelineRadarNotice("Clipboard access was blocked. Open lead detail and copy manually.", true);
+  }
+};
+
+window.attachSalesBriefToLead = async function (leadId) {
+  const id = String(leadId || "");
+  const card = currentPipeline.find((entry) => entry.id === id);
+  if (!card) {
+    setPipelineRadarNotice("Could not attach brief: lead not found.", true);
+    return;
+  }
+  const brief = buildLeadSalesBrief(card);
+  const stamp = formatDateTimeLabel(Date.now());
+  const briefBlock = [
+    `[Sales Brief ${stamp}]`,
+    `Recommended Service: ${brief.recommendedService}`,
+    `Opportunity: ${brief.opportunityLabel} (${brief.score}/100)`,
+    `Likely Needs: ${brief.likelyNeeds.join("; ")}`,
+    `Outreach Angle: ${brief.outreachAngle}`,
+    `Summary: ${brief.summary}`,
+  ].join("\n");
+  const currentNote = String(card.note || "").trim();
+  const nextNote = currentNote.includes(brief.summary)
+    ? currentNote
+    : (currentNote ? `${currentNote}\n\n${briefBlock}` : briefBlock);
+
+  try {
+    await updateDoc(doc(db, "pipeline", id), {
+      note: nextNote,
+      updatedAt: serverTimestamp(),
+    });
+    currentPipeline = currentPipeline.map((entry) => (
+      entry.id === id
+        ? { ...entry, note: nextNote, updatedAt: Date.now() }
+        : entry
+    ));
+    renderPipeline(currentPipeline);
+    setPipelineRadarNotice("Sales brief attached to lead notes.", false);
+  } catch (err) {
+    console.error("attachSalesBriefToLead:", err);
+    setPipelineRadarNotice("Could not attach sales brief to lead note.", true);
+  }
+};
+
+window.triggerLeadResearchCsvPicker = function () {
+  const input = document.getElementById("leadResearchCsvInput");
+  if (!input) {
+    setLeadResearchStatus("Lead research CSV picker is unavailable.", true);
+    return;
+  }
+  input.click();
+};
+
+window.ingestLeadResearchCsvFile = async function (inputEl) {
+  const file = inputEl?.files?.[0];
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const { headers, records } = parseCsvText(text);
+    if (!headers.length || !records.length) {
+      setLeadResearchStatus("CSV appears empty. Include a header row and at least one lead row.", true);
+      return;
+    }
+
+    const blockedHeaders = headers.filter((header) =>
+      LEAD_RESEARCH_BLOCKED_HEADERS.some((blocked) => header.includes(blocked))
+    );
+    if (blockedHeaders.length) {
+      setLeadResearchStatus(`Blocked sensitive column(s): ${blockedHeaders.join(", ")}. Remove these and retry.`, true);
+      return;
+    }
+
+    const existingPipelineEmail = new Set(
+      currentPipeline
+        .map((card) => normalizeEmail(leadPrimaryEmail(card)))
+        .filter(Boolean)
+    );
+    const existingPipelineCompany = new Set(
+      currentPipeline
+        .map((card) => normalizeLeadEntityKey(card.company || card.title || ""))
+        .filter((key) => key.length >= 5)
+    );
+    const existingResearchEmail = new Set(
+      currentLeadResearchImports
+        .map((record) => leadResearchEmailKey(record))
+        .filter(Boolean)
+    );
+    const existingResearchCompany = new Set(
+      currentLeadResearchImports
+        .map((record) => leadResearchCompanyKey(record))
+        .filter((key) => key.length >= 5)
+    );
+
+    let created = 0;
+    let skippedDuplicate = 0;
+    let skippedInvalid = 0;
+    let skippedCompliance = 0;
+
+    const rows = records.slice(0, LEAD_RESEARCH_ROW_LIMIT);
+    for (const entry of rows) {
+      const titleValue = pickCsvValue(entry, ["title", "leadname", "lead", "businessname", "business", "company", "name"]);
+      const companyValue = pickCsvValue(entry, ["company", "businessname", "business", "organization", "name"]) || titleValue;
+      const title = titleValue || companyValue;
+      const contact = pickCsvValue(entry, ["contact", "contactname", "owner", "decisionmaker", "person", "fullname"]);
+      const email = normalizeEmail(pickCsvValue(entry, ["email", "businessemail", "contactemail", "emailaddress"]));
+      const phone = pickCsvValue(entry, ["phone", "telephone", "mobile", "phonenumber"]);
+      const website = toAbsoluteWebsiteUrl(pickCsvValue(entry, ["website", "domain", "site", "web", "companywebsite"]));
+      const sourceLabel = pickCsvValue(entry, ["source", "directory", "platform", "sourcelabel", "list"]);
+      const sourceUrl = toAbsoluteWebsiteUrl(pickCsvValue(entry, ["sourceurl", "listingurl", "profileurl", "link"]));
+      const serviceHint = pickCsvValue(entry, ["service", "servicehint", "need", "needs", "category", "interest"]);
+      const note = pickCsvValue(entry, ["notes", "note", "qualification", "qualificationnotes", "context", "painpoint", "details", "summary"]);
+      const confidence = coerceConfidenceValue(pickCsvValue(entry, ["confidence", "score", "fit", "opportunityscore", "leadscore"]));
+
+      if (!title) {
+        skippedInvalid += 1;
+        continue;
+      }
+      if (!sourceLabel && !sourceUrl) {
+        skippedCompliance += 1;
+        continue;
+      }
+
+      const emailKey = normalizeEmail(email);
+      const companyKey = normalizeLeadEntityKey(companyValue || title);
+      const isDuplicate = (emailKey && (existingPipelineEmail.has(emailKey) || existingResearchEmail.has(emailKey)))
+        || (companyKey.length >= 5 && (existingPipelineCompany.has(companyKey) || existingResearchCompany.has(companyKey)));
+      if (isDuplicate) {
+        skippedDuplicate += 1;
+        continue;
+      }
+
+      await addDoc(collection(db, "lead_research_imports"), {
+        title,
+        company: companyValue,
+        contact,
+        email,
+        phone,
+        website,
+        serviceHint,
+        note,
+        confidence,
+        publicSourceLabel: sourceLabel,
+        publicSourceUrl: sourceUrl,
+        sourceFile: file.name,
+        status: "pending",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        createdByUid: auth.currentUser?.uid || "",
+        createdByEmail: auth.currentUser?.email || "",
+      });
+      created += 1;
+      if (emailKey) existingResearchEmail.add(emailKey);
+      if (companyKey.length >= 5) existingResearchCompany.add(companyKey);
+    }
+
+    const limitSuffix = records.length > LEAD_RESEARCH_ROW_LIMIT
+      ? ` Limited to first ${LEAD_RESEARCH_ROW_LIMIT} rows.`
+      : "";
+    setLeadResearchStatus(
+      `Imported ${created} staged leads.${limitSuffix} Skipped: duplicates ${skippedDuplicate}, invalid ${skippedInvalid}, missing source attribution ${skippedCompliance}.`,
+      created === 0
+    );
+  } catch (err) {
+    console.error("ingestLeadResearchCsvFile:", err);
+    setLeadResearchStatus("Could not parse/import CSV. Check encoding and header format.", true);
+  } finally {
+    if (inputEl) inputEl.value = "";
+  }
+};
+
+window.copyResearchSalesBrief = async function (recordId) {
+  const id = String(recordId || "");
+  const record = currentLeadResearchImports.find((entry) => entry.id === id);
+  if (!record) {
+    setLeadResearchStatus("Could not copy brief: staged lead not found.", true);
+    return;
+  }
+  const candidate = leadResearchCandidateFromRecord(record);
+  const brief = buildLeadSalesBrief(candidate);
+  try {
+    await navigator.clipboard.writeText(formatSalesBriefText(candidate, brief));
+    setLeadResearchStatus(`Sales brief copied for ${candidate.title}.`, false);
+  } catch (err) {
+    console.error("copyResearchSalesBrief:", err);
+    setLeadResearchStatus("Clipboard access was blocked. Open lead row and copy manually.", true);
+  }
+};
+
+window.approveResearchLead = async function (recordId) {
+  const id = String(recordId || "");
+  if (!id) return;
+  try {
+    await updateDoc(doc(db, "lead_research_imports", id), {
+      status: "approved",
+      reviewedAt: serverTimestamp(),
+      reviewedByUid: auth.currentUser?.uid || "",
+      reviewedByName: auth.currentUser?.email || "",
+      updatedAt: serverTimestamp(),
+    });
+    setLeadResearchStatus("Lead approved for pipeline import.", false);
+  } catch (err) {
+    console.error("approveResearchLead:", err);
+    setLeadResearchStatus("Could not approve staged lead.", true);
+  }
+};
+
+window.rejectResearchLead = async function (recordId) {
+  const id = String(recordId || "");
+  if (!id) return;
+  const reason = prompt("Optional rejection reason (shown internally):", "");
+  if (reason === null) return;
+  try {
+    await updateDoc(doc(db, "lead_research_imports", id), {
+      status: "rejected",
+      rejectionReason: String(reason || "").trim(),
+      reviewedAt: serverTimestamp(),
+      reviewedByUid: auth.currentUser?.uid || "",
+      reviewedByName: auth.currentUser?.email || "",
+      updatedAt: serverTimestamp(),
+    });
+    setLeadResearchStatus("Lead marked as rejected.", false);
+  } catch (err) {
+    console.error("rejectResearchLead:", err);
+    setLeadResearchStatus("Could not reject staged lead.", true);
+  }
+};
+
+async function importResearchLeadRecord(record) {
+  const id = String(record?.id || "");
+  if (!id) return { ok: false, reason: "missing-id" };
+  const status = normalizeLeadResearchStatus(record?.status);
+  if (status !== "approved") return { ok: false, reason: "not-approved" };
+
+  const emailKey = leadResearchEmailKey(record);
+  const companyKey = leadResearchCompanyKey(record);
+  const duplicateInPipeline = currentPipeline.some((card) => {
+    const pipelineEmail = normalizeEmail(leadPrimaryEmail(card));
+    const pipelineCompany = normalizeLeadEntityKey(card.company || card.title || "");
+    return (emailKey && pipelineEmail && emailKey === pipelineEmail)
+      || (companyKey.length >= 5 && pipelineCompany === companyKey);
+  });
+  if (duplicateInPipeline) {
+    return { ok: false, reason: "duplicate" };
+  }
+
+  const candidate = leadResearchCandidateFromRecord(record);
+  const brief = buildLeadSalesBrief(candidate);
+  const sourceLabel = String(record.publicSourceLabel || record.sourceLabel || "Public source");
+  const sourceUrl = toAbsoluteWebsiteUrl(record.publicSourceUrl || record.sourceUrl || "");
+  const noteParts = [
+    `Research import source: ${sourceLabel}${sourceUrl ? ` (${sourceUrl})` : ""}`,
+    `Confidence: ${coerceConfidenceValue(record.confidence)}/100`,
+    record.note ? `Research notes: ${record.note}` : "",
+    `Sales brief:\n- Recommended Service: ${brief.recommendedService}\n- Opportunity: ${brief.opportunityLabel} (${brief.score}/100)\n- Outreach Angle: ${brief.outreachAngle}\n- Summary: ${brief.summary}`,
+  ].filter(Boolean);
+  const contactLabel = [record.contact, record.email, record.phone].filter(Boolean).join(" | ").slice(0, 200);
+
+  const pipelineRef = await addDoc(collection(db, "pipeline"), {
+    title: candidate.title,
+    company: candidate.company,
+    contact: contactLabel,
+    service: brief.recommendedService,
+    ownerUid: TEAM_ASSIGNMENT_UID,
+    ownerName: "Entire Team",
+    status: "leads",
+    source: "research-import",
+    note: noteParts.join("\n\n"),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await updateDoc(doc(db, "lead_research_imports", id), {
+    status: "imported",
+    importedAt: serverTimestamp(),
+    importedPipelineId: pipelineRef.id,
+    reviewedAt: serverTimestamp(),
+    reviewedByUid: auth.currentUser?.uid || "",
+    reviewedByName: auth.currentUser?.email || "",
+    updatedAt: serverTimestamp(),
+  });
+  return { ok: true, pipelineId: pipelineRef.id };
+}
+
+window.importResearchLead = async function (recordId) {
+  const id = String(recordId || "");
+  const record = currentLeadResearchImports.find((entry) => entry.id === id);
+  if (!record) {
+    setLeadResearchStatus("Could not import: staged lead not found.", true);
+    return;
+  }
+  try {
+    const result = await importResearchLeadRecord(record);
+    if (result.ok) {
+      setLeadResearchStatus("Approved lead imported into pipeline.", false);
+      return;
+    }
+    if (result.reason === "not-approved") {
+      setLeadResearchStatus("Approve the staged lead before importing.", true);
+      return;
+    }
+    if (result.reason === "duplicate") {
+      setLeadResearchStatus("Skipped import: duplicate already exists in pipeline.", true);
+      return;
+    }
+    setLeadResearchStatus("Could not import staged lead.", true);
+  } catch (err) {
+    console.error("importResearchLead:", err);
+    setLeadResearchStatus("Could not import staged lead.", true);
+  }
+};
+
+window.importApprovedResearchLeads = async function () {
+  const approved = currentLeadResearchImports
+    .filter((entry) => normalizeLeadResearchStatus(entry.status) === "approved")
+    .slice(0, LEAD_RESEARCH_ROW_LIMIT);
+  if (!approved.length) {
+    setLeadResearchStatus("No approved staged leads available for import.", true);
+    return;
+  }
+
+  let imported = 0;
+  let skippedDuplicate = 0;
+  let failed = 0;
+
+  for (const record of approved) {
+    try {
+      const result = await importResearchLeadRecord(record);
+      if (result.ok) imported += 1;
+      else if (result.reason === "duplicate") skippedDuplicate += 1;
+      else failed += 1;
+    } catch (err) {
+      console.error("importApprovedResearchLeads item:", err);
+      failed += 1;
+    }
+  }
+
+  setLeadResearchStatus(
+    `Bulk import complete. Imported ${imported}, duplicates skipped ${skippedDuplicate}, failed ${failed}.`,
+    failed > 0
+  );
+};
+
+window.clearRejectedResearchLeads = async function () {
+  const rejected = currentLeadResearchImports.filter((entry) => normalizeLeadResearchStatus(entry.status) === "rejected");
+  if (!rejected.length) {
+    setLeadResearchStatus("No rejected rows to clear.", true);
+    return;
+  }
+  if (!confirm(`Delete ${rejected.length} rejected staged leads?`)) return;
+  try {
+    for (const row of rejected) {
+      await deleteDoc(doc(db, "lead_research_imports", row.id));
+    }
+    setLeadResearchStatus(`Cleared ${rejected.length} rejected staged leads.`, false);
+  } catch (err) {
+    console.error("clearRejectedResearchLeads:", err);
+    setLeadResearchStatus("Could not clear rejected staged leads.", true);
+  }
 };
 
 window.updateLeadListFilter = function (field, rawValue) {
