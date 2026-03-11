@@ -70,6 +70,9 @@ let collapsedPipelineCols = new Set();
 let hasTaskBackfillRun = false;
 let isTaskBackfillRunning = false;
 let pipelineFocusFilter = "all";
+let pipelineRadarNoticeText = "";
+let pipelineRadarNoticeError = false;
+let pipelineRadarNoticeTimer = null;
 
 // ─── TASK SORT STATE ─────────────────────────────────────────────────────────
 let taskSortField = "due";     // "due" | "createdAt" | "priority" | "owner" | "done"
@@ -780,11 +783,38 @@ function pipelineLeadMatchesFocus(card, focus = pipelineFocusFilter) {
   return true;
 }
 
+function oldestUnassignedPipelineLead(cards) {
+  return (Array.isArray(cards) ? cards : [])
+    .filter((card) => !isPipelineLeadClosed(card) && isPipelineLeadUnassigned(card))
+    .sort((a, b) => {
+      const ams = requestTimelineMs(a.createdAt) || pipelineLeadUpdatedMs(a);
+      const bms = requestTimelineMs(b.createdAt) || pipelineLeadUpdatedMs(b);
+      return ams - bms;
+    })[0] || null;
+}
+
 function pipelineFocusLabel(focus) {
   if (focus === "unassigned") return "Unassigned";
   if (focus === "stale") return `Stale (${PIPELINE_STALE_DAYS}+ days)`;
   if (focus === "high_intent") return "High Intent";
   return "All Leads";
+}
+
+function setPipelineRadarNotice(message, isError = false) {
+  pipelineRadarNoticeText = String(message || "").trim();
+  pipelineRadarNoticeError = Boolean(isError);
+  if (pipelineRadarNoticeTimer) {
+    clearTimeout(pipelineRadarNoticeTimer);
+    pipelineRadarNoticeTimer = null;
+  }
+  if (pipelineRadarNoticeText) {
+    pipelineRadarNoticeTimer = setTimeout(() => {
+      pipelineRadarNoticeText = "";
+      pipelineRadarNoticeError = false;
+      pipelineRadarNoticeTimer = null;
+      renderPipeline(currentPipeline);
+    }, 4500);
+  }
 }
 
 function renderPipelineRadar(cards, visibleCards) {
@@ -794,6 +824,7 @@ function renderPipelineRadar(cards, visibleCards) {
   const allCards = Array.isArray(cards) ? cards : [];
   const scopedCards = Array.isArray(visibleCards) ? visibleCards : allCards;
   const openCards = allCards.filter((card) => !isPipelineLeadClosed(card));
+  const oldestUnassigned = oldestUnassignedPipelineLead(allCards);
   const filterButtons = [
     { key: "all", label: "All", count: allCards.length },
     { key: "unassigned", label: "Unassigned", count: openCards.filter(isPipelineLeadUnassigned).length },
@@ -838,12 +869,34 @@ function renderPipelineRadar(cards, visibleCards) {
         </button>
       `).join("")}
     </div>
+    <div class="pipeline-radar-actions">
+      <button
+        type="button"
+        class="pipeline-radar-action-btn"
+        onclick="claimOldestUnassignedLead()"
+        ${oldestUnassigned ? "" : "disabled"}
+      >
+        Claim Oldest Unassigned
+      </button>
+      <span class="pipeline-radar-action-context">
+        ${
+          oldestUnassigned
+            ? `Next lead: ${escHtml(oldestUnassigned.title || "Untitled lead")}`
+            : "No unassigned open leads right now."
+        }
+      </span>
+    </div>
     ${
       pipelineFocusFilter !== "all"
         ? `<div class="pipeline-radar-active">
              Showing ${scopedCards.length} / ${allCards.length} leads for: <strong>${escHtml(pipelineFocusLabel(pipelineFocusFilter))}</strong>
              <button type="button" class="pipeline-radar-clear" onclick="setPipelineFocusFilter('all')">Clear filter</button>
            </div>`
+        : ""
+    }
+    ${
+      pipelineRadarNoticeText
+        ? `<div class="pipeline-radar-notice${pipelineRadarNoticeError ? " is-error" : ""}">${escHtml(pipelineRadarNoticeText)}</div>`
         : ""
     }
   `;
@@ -2747,6 +2800,43 @@ window.setPipelineFocusFilter = function (nextFilter) {
     pipelineFocusFilter = "all";
   } else {
     pipelineFocusFilter = normalized;
+  }
+  renderPipeline(currentPipeline);
+};
+
+window.claimOldestUnassignedLead = async function () {
+  const currentUid = String(auth.currentUser?.uid || "");
+  if (!currentUid) {
+    setPipelineRadarNotice("Sign in again to claim leads.", true);
+    renderPipeline(currentPipeline);
+    return;
+  }
+
+  const target = oldestUnassignedPipelineLead(currentPipeline);
+  if (!target) {
+    setPipelineRadarNotice("No unassigned open leads to claim.", false);
+    renderPipeline(currentPipeline);
+    return;
+  }
+
+  const fallbackLabel = String(auth.currentUser?.displayName || auth.currentUser?.email || "Current User");
+  const ownerName = resolveTeamUserName(currentUid, fallbackLabel);
+
+  try {
+    await updateDoc(doc(db, "pipeline", target.id), {
+      ownerUid: currentUid,
+      ownerName,
+      updatedAt: serverTimestamp(),
+    });
+    currentPipeline = currentPipeline.map((card) => (
+      card.id === target.id
+        ? { ...card, ownerUid: currentUid, ownerName, updatedAt: Date.now() }
+        : card
+    ));
+    setPipelineRadarNotice(`Claimed ${target.title || "lead"} as ${ownerName}.`, false);
+  } catch (err) {
+    console.error("claimOldestUnassignedLead:", err);
+    setPipelineRadarNotice("Could not claim lead. Please try again.", true);
   }
   renderPipeline(currentPipeline);
 };

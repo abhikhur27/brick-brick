@@ -125,6 +125,20 @@ function makeActions() {
       run: () => runWhenWorkspaceReady(() => setPipelineRadarFilter("all", "Pipeline focus cleared.")),
     },
     {
+      id: "pipeline_claim_oldest",
+      label: "Pipeline: Claim Oldest Unassigned",
+      hint: "Radar",
+      keywords: "pipeline claim unassigned ownership follow up",
+      run: () => runWhenWorkspaceReady(() => {
+        gotoPage("pipeline");
+        if (typeof window.claimOldestUnassignedLead === "function") {
+          window.claimOldestUnassignedLead();
+        } else {
+          showToast("Claim action unavailable.");
+        }
+      }),
+    },
+    {
       id: "go_messages_requests",
       label: "Go to Messages / Requests",
       hint: "G, M",
