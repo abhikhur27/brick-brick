@@ -757,7 +757,7 @@ body::before {
 
 .lead-list-filter-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 10px;
 }
@@ -891,6 +891,49 @@ table.lead-list-table tr:hover td {
 .lead-list-open-btn {
   font-size: 9px;
   letter-spacing: 1px;
+}
+
+.lead-followup-chip,
+.lead-signal-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.lead-followup-overdue {
+  color: var(--red-soft);
+  border-color: rgba(236, 112, 99, 0.35);
+  background: rgba(236, 112, 99, 0.1);
+}
+
+.lead-followup-today {
+  color: var(--gold);
+  border-color: rgba(184, 168, 120, 0.35);
+  background: rgba(184, 168, 120, 0.12);
+}
+
+.lead-followup-next {
+  color: var(--blue-soft);
+  border-color: rgba(93, 173, 226, 0.35);
+  background: rgba(93, 173, 226, 0.1);
+}
+
+.lead-followup-later {
+  color: var(--silver-dim);
+  border-color: var(--border);
+  background: rgba(136, 136, 136, 0.08);
+}
+
+.lead-signal-chip {
+  color: var(--gold);
+  border-color: rgba(184, 168, 120, 0.35);
+  background: rgba(184, 168, 120, 0.1);
 }
 
 table.lead-list-table tr:last-child td {
@@ -1915,7 +1958,7 @@ tr.request-row-archived td {
 
 /* ─── RESPONSIVE ─────────────────────────────────────────────────────────── */
 @media (max-width: 1100px) {
-  .lead-list-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .lead-list-filter-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .kanban { grid-template-columns: repeat(2, 1fr); }
   .my-work-grid { grid-template-columns: 1fr; }
   .clients-layout { grid-template-columns: 1fr; }

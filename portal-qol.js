@@ -163,6 +163,20 @@ function makeActions() {
       run: () => runWhenWorkspaceReady(() => applyLeadListPreset("website_inbound", "Lead list preset: website inbound.")),
     },
     {
+      id: "lead_list_daily_call_list",
+      label: "Lead List: Daily Call List",
+      hint: "Generator",
+      keywords: "lead list call list follow up overdue due today",
+      run: () => runWhenWorkspaceReady(() => applyLeadListPreset("daily_call_list", "Lead list preset: daily call list.")),
+    },
+    {
+      id: "lead_list_duplicates_review",
+      label: "Lead List: Duplicates Review",
+      hint: "Generator",
+      keywords: "lead list duplicates merge review",
+      run: () => runWhenWorkspaceReady(() => applyLeadListPreset("duplicates_review", "Lead list preset: duplicates review.")),
+    },
+    {
       id: "go_messages_requests",
       label: "Go to Messages / Requests",
       hint: "G, M",

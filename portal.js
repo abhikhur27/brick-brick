@@ -69,6 +69,8 @@ const LEAD_LIST_DEFAULT_FILTERS = {
   source: "all",
   owner: "any",
   timeframe: "30",
+  followUp: "all",
+  duplicate: "all",
   sort: "priority",
   limit: 25,
 };
@@ -894,9 +896,71 @@ function leadOwnerLabel(card) {
   return resolveTeamUserName(card?.ownerUid, card?.ownerName) || "Unassigned";
 }
 
+function normalizeLeadEntityKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
+function startOfLocalDayMs(ms = Date.now()) {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function endOfLocalDayMs(ms = Date.now()) {
+  const d = new Date(ms);
+  d.setHours(23, 59, 59, 999);
+  return d.getTime();
+}
+
+function leadNextFollowUpMs(card) {
+  if (isPipelineLeadClosed(card)) return 0;
+  const baseMs = pipelineLeadUpdatedMs(card) || requestTimelineMs(card?.createdAt);
+  if (!baseMs) return 0;
+  const status = String(card?.status || "leads");
+  const daysByStatus = {
+    leads: 1,
+    contacted: 2,
+    proposal: 3,
+  };
+  const waitDays = daysByStatus[status] ?? 2;
+  return baseMs + (waitDays * 24 * 60 * 60 * 1000);
+}
+
+function followUpBucketForMs(nextFollowUpMs) {
+  if (!nextFollowUpMs) return "none";
+  const startToday = startOfLocalDayMs();
+  const endToday = endOfLocalDayMs();
+  const endNext7 = endOfLocalDayMs(Date.now() + (6 * 24 * 60 * 60 * 1000));
+  if (nextFollowUpMs < startToday) return "overdue";
+  if (nextFollowUpMs <= endToday) return "due_today";
+  if (nextFollowUpMs <= endNext7) return "next_7";
+  return "later";
+}
+
+function followUpLabelForBucket(bucket, nextFollowUpMs) {
+  if (bucket === "overdue") return "Overdue";
+  if (bucket === "due_today") return "Today";
+  if (bucket === "next_7") return "Next 7d";
+  if (bucket === "later") return "Later";
+  return nextFollowUpMs ? formatDateTimeLabel(nextFollowUpMs) : "—";
+}
+
+function followUpClassForBucket(bucket) {
+  if (bucket === "overdue") return "lead-followup-overdue";
+  if (bucket === "due_today") return "lead-followup-today";
+  if (bucket === "next_7") return "lead-followup-next";
+  return "lead-followup-later";
+}
+
 function leadFollowUpPriorityScore(card) {
   if (isPipelineLeadClosed(card)) return 0;
   let score = 0;
+  const followUpBucket = followUpBucketForMs(leadNextFollowUpMs(card));
+  if (followUpBucket === "overdue") score += 25;
+  if (followUpBucket === "due_today") score += 15;
   if (isPipelineLeadStale(card)) score += 35;
   if (isPipelineLeadUnassigned(card)) score += 25;
   if (isPipelineLeadHighIntent(card)) score += 20;
@@ -925,13 +989,36 @@ function buildGeneratedLeadList(cards) {
   const sourceFilter = String(leadListFilters.source || "all");
   const ownerFilter = String(leadListFilters.owner || "any");
   const timeframeDays = Number(leadListFilters.timeframe || 0);
+  const followUpFilter = String(leadListFilters.followUp || "all");
+  const duplicateFilter = String(leadListFilters.duplicate || "all");
   const sortFilter = String(leadListFilters.sort || "priority");
   const limit = Math.max(1, Math.min(200, Number(leadListFilters.limit || LEAD_LIST_DEFAULT_FILTERS.limit)));
   const cutoffMs = timeframeDays > 0
     ? Date.now() - (timeframeDays * 24 * 60 * 60 * 1000)
     : 0;
+  const emailGroups = new Map();
+  const companyGroups = new Map();
+
+  allCards.forEach((card) => {
+    if (isPipelineLeadClosed(card)) return;
+    const cardId = String(card?.id || "");
+    if (!cardId) return;
+
+    const email = leadPrimaryEmail(card);
+    if (email) {
+      if (!emailGroups.has(email)) emailGroups.set(email, []);
+      emailGroups.get(email).push(cardId);
+    }
+
+    const companyKey = normalizeLeadEntityKey(card?.company || card?.title || "");
+    if (companyKey.length >= 5) {
+      if (!companyGroups.has(companyKey)) companyGroups.set(companyKey, []);
+      companyGroups.get(companyKey).push(cardId);
+    }
+  });
 
   const filtered = allCards.filter((card) => {
+    const cardId = String(card?.id || "");
     const status = String(card?.status || "");
     if (stageFilter === "open" && status === "closed") return false;
     if (stageFilter !== "open" && stageFilter !== "all" && status !== stageFilter) return false;
@@ -950,21 +1037,53 @@ function buildGeneratedLeadList(cards) {
       if (!createdMs || createdMs < cutoffMs) return false;
     }
 
+    const nextFollowUpMs = leadNextFollowUpMs(card);
+    const followUpBucket = followUpBucketForMs(nextFollowUpMs);
+    if (followUpFilter === "call_now" && followUpBucket !== "overdue" && followUpBucket !== "due_today") return false;
+    if (followUpFilter === "overdue" && followUpBucket !== "overdue") return false;
+    if (followUpFilter === "due_today" && followUpBucket !== "due_today") return false;
+    if (followUpFilter === "next_7" && followUpBucket !== "due_today" && followUpBucket !== "next_7") return false;
+
+    const email = leadPrimaryEmail(card);
+    const companyKey = normalizeLeadEntityKey(card?.company || card?.title || "");
+    const emailDupCount = email ? (emailGroups.get(email)?.length || 0) : 0;
+    const companyDupCount = companyKey ? (companyGroups.get(companyKey)?.length || 0) : 0;
+    const hasDuplicate = emailDupCount > 1 || companyDupCount > 1;
+    if (duplicateFilter === "duplicates" && !hasDuplicate) return false;
+    if (duplicateFilter === "unique" && hasDuplicate) return false;
+
+    if (!cardId) return false;
     return true;
   });
 
   const list = filtered.map((card) => {
+    const cardId = String(card?.id || "");
+    const email = leadPrimaryEmail(card);
+    const companyKey = normalizeLeadEntityKey(card?.company || card?.title || "");
+    const emailGroup = email ? (emailGroups.get(email) || []) : [];
+    const companyGroup = companyKey ? (companyGroups.get(companyKey) || []) : [];
+    const relatedMatches = [...new Set([...emailGroup, ...companyGroup])]
+      .filter((candidateId) => candidateId !== cardId);
+    const duplicateType = emailGroup.length > 1
+      ? "email"
+      : (companyGroup.length > 1 ? "company" : "");
+    const duplicateCount = relatedMatches.length ? relatedMatches.length + 1 : 0;
+    const duplicateHint = relatedMatches.length
+      ? `${duplicateType === "email" ? "Email match" : "Company match"}: ${relatedMatches.slice(0, 3).map((id) => `#${id.slice(0, 6)}`).join(", ")}${relatedMatches.length > 3 ? " ..." : ""}`
+      : "";
+    const nextFollowUpMs = leadNextFollowUpMs(card);
+    const followUpBucket = followUpBucketForMs(nextFollowUpMs);
     const createdMs = requestTimelineMs(card?.createdAt) || pipelineLeadUpdatedMs(card);
     const updatedMs = pipelineLeadUpdatedMs(card);
     const priorityScore = leadFollowUpPriorityScore(card);
     const sourceKey = leadSourceKey(card);
     const ownerLabel = leadOwnerLabel(card);
     return {
-      id: String(card?.id || ""),
+      id: cardId,
       title: String(card?.title || "Untitled lead"),
       company: String(card?.company || ""),
       contactLabel: String(card?.contact || "").trim() || "—",
-      email: leadPrimaryEmail(card),
+      email,
       stage: String(card?.status || "leads"),
       stageLabel: pipelineStatusLabel(card?.status),
       sourceKey,
@@ -976,6 +1095,14 @@ function buildGeneratedLeadList(cards) {
       priorityScore,
       priorityClass: leadPriorityClass(priorityScore),
       priorityLabel: leadPriorityLabel(priorityScore),
+      nextFollowUpMs,
+      followUpBucket,
+      followUpLabel: followUpLabelForBucket(followUpBucket, nextFollowUpMs),
+      followUpClass: followUpClassForBucket(followUpBucket),
+      duplicateCount,
+      duplicateType,
+      duplicateHint,
+      mergeMatches: relatedMatches,
       createdMs,
       updatedMs,
     };
@@ -985,6 +1112,21 @@ function buildGeneratedLeadList(cards) {
     if (sortFilter === "oldest") return a.createdMs - b.createdMs;
     if (sortFilter === "newest") return b.createdMs - a.createdMs;
     if (sortFilter === "updated") return b.updatedMs - a.updatedMs;
+    if (sortFilter === "followup") {
+      const bucketWeight = {
+        overdue: 0,
+        due_today: 1,
+        next_7: 2,
+        later: 3,
+        none: 4,
+      };
+      const aw = bucketWeight[a.followUpBucket] ?? 5;
+      const bw = bucketWeight[b.followUpBucket] ?? 5;
+      if (aw !== bw) return aw - bw;
+      const aFollowUp = a.nextFollowUpMs || Number.MAX_SAFE_INTEGER;
+      const bFollowUp = b.nextFollowUpMs || Number.MAX_SAFE_INTEGER;
+      if (aFollowUp !== bFollowUp) return aFollowUp - bFollowUp;
+    }
     if (b.priorityScore !== a.priorityScore) return b.priorityScore - a.priorityScore;
     return a.createdMs - b.createdMs;
   });
@@ -1002,6 +1144,10 @@ function renderLeadListBuilder(cards) {
   const websiteCount = leadList.filter((lead) => lead.sourceKey === "website").length;
   const highPriorityCount = leadList.filter((lead) => lead.priorityScore >= 70).length;
   const unassignedCount = leadList.filter((lead) => lead.unassigned).length;
+  const callNowCount = leadList.filter((lead) =>
+    lead.followUpBucket === "overdue" || lead.followUpBucket === "due_today"
+  ).length;
+  const duplicateLeadCount = leadList.filter((lead) => lead.duplicateCount > 1).length;
 
   host.innerHTML = `
     <div class="lead-list-head">
@@ -1056,9 +1202,28 @@ function renderLeadListBuilder(cards) {
         </select>
       </div>
       <div class="lead-list-filter-group">
+        <label class="lead-list-filter-label">Follow-up</label>
+        <select class="form-select" onchange="updateLeadListFilter('followUp', this.value)">
+          <option value="all" ${leadListFilters.followUp === "all" ? "selected" : ""}>All</option>
+          <option value="call_now" ${leadListFilters.followUp === "call_now" ? "selected" : ""}>Call Now (Today + Overdue)</option>
+          <option value="overdue" ${leadListFilters.followUp === "overdue" ? "selected" : ""}>Overdue</option>
+          <option value="due_today" ${leadListFilters.followUp === "due_today" ? "selected" : ""}>Due Today</option>
+          <option value="next_7" ${leadListFilters.followUp === "next_7" ? "selected" : ""}>Next 7 Days</option>
+        </select>
+      </div>
+      <div class="lead-list-filter-group">
+        <label class="lead-list-filter-label">Duplicates</label>
+        <select class="form-select" onchange="updateLeadListFilter('duplicate', this.value)">
+          <option value="all" ${leadListFilters.duplicate === "all" ? "selected" : ""}>All</option>
+          <option value="duplicates" ${leadListFilters.duplicate === "duplicates" ? "selected" : ""}>Duplicates Only</option>
+          <option value="unique" ${leadListFilters.duplicate === "unique" ? "selected" : ""}>Unique Only</option>
+        </select>
+      </div>
+      <div class="lead-list-filter-group">
         <label class="lead-list-filter-label">Sort</label>
         <select class="form-select" onchange="updateLeadListFilter('sort', this.value)">
           <option value="priority" ${leadListFilters.sort === "priority" ? "selected" : ""}>Follow-up Priority</option>
+          <option value="followup" ${leadListFilters.sort === "followup" ? "selected" : ""}>Follow-up Due First</option>
           <option value="newest" ${leadListFilters.sort === "newest" ? "selected" : ""}>Newest First</option>
           <option value="oldest" ${leadListFilters.sort === "oldest" ? "selected" : ""}>Oldest First</option>
           <option value="updated" ${leadListFilters.sort === "updated" ? "selected" : ""}>Recently Updated</option>
@@ -1075,6 +1240,8 @@ function renderLeadListBuilder(cards) {
       <span class="lead-list-pill">Website <strong>${websiteCount}</strong></span>
       <span class="lead-list-pill">Priority High <strong>${highPriorityCount}</strong></span>
       <span class="lead-list-pill">Unassigned <strong>${unassignedCount}</strong></span>
+      <span class="lead-list-pill">Call Now <strong>${callNowCount}</strong></span>
+      <span class="lead-list-pill">Duplicates <strong>${duplicateLeadCount}</strong></span>
     </div>
 
     ${
@@ -1096,6 +1263,8 @@ function renderLeadListBuilder(cards) {
                    <th>Source</th>
                    <th>Owner</th>
                    <th>Priority</th>
+                   <th>Follow-up</th>
+                   <th>Signals</th>
                    <th>Created</th>
                    <th></th>
                  </tr>
@@ -1120,6 +1289,26 @@ function renderLeadListBuilder(cards) {
                      <td><div class="lead-list-subtext">${escHtml(lead.sourceLabel)}</div></td>
                      <td>${assigneeChipHtml(lead.ownerUid, lead.ownerName, "Unassigned")}</td>
                      <td><span class="priority ${lead.priorityClass}">${escHtml(lead.priorityLabel)}</span></td>
+                     <td>
+                       <span class="lead-followup-chip ${lead.followUpClass}">${escHtml(lead.followUpLabel)}</span>
+                       ${
+                         lead.nextFollowUpMs
+                           ? `<div class="lead-list-subtext">${escHtml(formatDateTimeLabel(lead.nextFollowUpMs))}</div>`
+                           : ""
+                       }
+                     </td>
+                     <td>
+                       ${
+                         lead.duplicateCount > 1
+                           ? `<span class="lead-signal-chip">Dupes x${lead.duplicateCount}</span>`
+                           : `<span class="lead-list-subtext">—</span>`
+                       }
+                       ${
+                         lead.duplicateHint
+                           ? `<div class="lead-list-subtext">${escHtml(lead.duplicateHint)}</div>`
+                           : ""
+                       }
+                     </td>
                      <td class="date-text">${escHtml(formatDateTimeLabel(lead.createdMs))}</td>
                      <td><button class="card-btn lead-list-open-btn" type="button" onclick="openLeadDetail('${escHtmlAttr(lead.id)}')">Open</button></td>
                    </tr>
@@ -3139,7 +3328,11 @@ window.resetLeadListFilters = function () {
 
 window.generateLeadList = function () {
   renderLeadListBuilder(currentPipeline);
-  setLeadListStatus(`Generated ${generatedLeadList.length} leads.`, false);
+  const callNowCount = generatedLeadList.filter((lead) =>
+    lead.followUpBucket === "overdue" || lead.followUpBucket === "due_today"
+  ).length;
+  const duplicateCount = generatedLeadList.filter((lead) => lead.duplicateCount > 1).length;
+  setLeadListStatus(`Generated ${generatedLeadList.length} leads | Call now: ${callNowCount} | Duplicates: ${duplicateCount}.`, false);
 };
 
 window.applyLeadListPreset = function (presetKey) {
@@ -3151,6 +3344,8 @@ window.applyLeadListPreset = function (presetKey) {
       source: "website",
       owner: "any",
       timeframe: "30",
+      followUp: "all",
+      duplicate: "all",
       sort: "newest",
       limit: 50,
     };
@@ -3164,10 +3359,42 @@ window.applyLeadListPreset = function (presetKey) {
       source: "all",
       owner: "unassigned",
       timeframe: "30",
+      followUp: "call_now",
+      duplicate: "all",
       sort: "priority",
       limit: 25,
     };
     setLeadListStatus("Preset loaded: unassigned follow-up queue.", false);
+    return;
+  }
+  if (key === "daily_call_list") {
+    leadListFilters = {
+      ...LEAD_LIST_DEFAULT_FILTERS,
+      stage: "open",
+      source: "all",
+      owner: "any",
+      timeframe: "30",
+      followUp: "call_now",
+      duplicate: "all",
+      sort: "followup",
+      limit: 40,
+    };
+    setLeadListStatus("Preset loaded: daily call list (due today + overdue).", false);
+    return;
+  }
+  if (key === "duplicates_review") {
+    leadListFilters = {
+      ...LEAD_LIST_DEFAULT_FILTERS,
+      stage: "open",
+      source: "all",
+      owner: "any",
+      timeframe: "90",
+      followUp: "all",
+      duplicate: "duplicates",
+      sort: "priority",
+      limit: 60,
+    };
+    setLeadListStatus("Preset loaded: duplicates review queue.", false);
     return;
   }
   setLeadListStatus("Unknown lead-list preset.", true);
@@ -3212,6 +3439,11 @@ window.downloadLeadListCsv = function () {
     "Owner",
     "Priority",
     "PriorityScore",
+    "FollowUpDate",
+    "FollowUpBucket",
+    "DuplicateCount",
+    "DuplicateType",
+    "MergeMatches",
     "CreatedAt",
     "UpdatedAt",
     "LeadId",
@@ -3227,6 +3459,11 @@ window.downloadLeadListCsv = function () {
     lead.ownerLabel,
     lead.priorityLabel,
     lead.priorityScore,
+    lead.nextFollowUpMs ? formatDateTimeLabel(lead.nextFollowUpMs) : "",
+    lead.followUpBucket,
+    lead.duplicateCount,
+    lead.duplicateType,
+    lead.mergeMatches.join("|"),
     formatDateTimeLabel(lead.createdMs),
     formatDateTimeLabel(lead.updatedMs),
     lead.id,
