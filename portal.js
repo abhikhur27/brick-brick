@@ -2085,6 +2085,7 @@ function renderTasks(tasks) {
     const ownerKindLabel = ownerKind === "team"
       ? "Team Shared"
       : (ownerKind === "personal" ? "Personal" : "Custom");
+    const taskName = String(task.name || "");
 
     const addedStr = task.createdAt?.toDate
       ? task.createdAt.toDate().toLocaleDateString("en-US", { month: "short", day: "numeric" })
@@ -2096,13 +2097,18 @@ function renderTasks(tasks) {
 
     tr.innerHTML = `
       <td><div class="checkbox ${task.done ? "checked" : ""}" onclick="toggleTask('${task.id}', ${!task.done})"></div></td>
-      <td class="task-name-cell"><span class="task-name">${escHtml(task.name)}</span>${staleBadge}</td>
+      <td class="task-name-cell">
+        <span class="task-name" title="${escHtmlAttr(taskName)}">${escHtml(taskName)}</span>
+        ${staleBadge}
+      </td>
       <td>
-        <span class="owner-chip owner-chip-${ownerKind}">
-          <span class="avatar">${initials}</span>
-          ${escHtml(ownerLabel)}
-        </span>
-        <span class="task-owner-kind kind-${ownerKind}">${ownerKindLabel}</span>
+        <div class="task-owner-stack">
+          <span class="owner-chip owner-chip-${ownerKind}">
+            <span class="avatar">${initials}</span>
+            ${escHtml(ownerLabel)}
+          </span>
+          <span class="task-owner-kind kind-${ownerKind}">${ownerKindLabel}</span>
+        </div>
       </td>
       <td><span class="date-text ${isOverdue ? "date-overdue" : ""}">${formatDate(task.due)}</span></td>
       <td><span class="date-text">${addedStr}</span></td>

@@ -1233,6 +1233,7 @@ table.lead-list-table tr:last-child td {
 .tasks-wrap { overflow-x: auto; }
 
 table.tasks { width: 100%; border-collapse: collapse; }
+table.tasks.tasks-main { table-layout: fixed; }
 
 table.tasks th {
   font-family: 'DM Mono', monospace;
@@ -1246,6 +1247,18 @@ table.tasks th {
   font-weight: 400;
   white-space: nowrap;
 }
+table.tasks.tasks-main th:nth-child(1),
+table.tasks.tasks-main td:nth-child(1) { width: 32px; }
+table.tasks.tasks-main th:nth-child(3),
+table.tasks.tasks-main td:nth-child(3) { width: 170px; }
+table.tasks.tasks-main th:nth-child(4),
+table.tasks.tasks-main td:nth-child(4) { width: 112px; }
+table.tasks.tasks-main th:nth-child(5),
+table.tasks.tasks-main td:nth-child(5) { width: 96px; }
+table.tasks.tasks-main th:nth-child(6),
+table.tasks.tasks-main td:nth-child(6) { width: 88px; }
+table.tasks.tasks-main th:nth-child(7),
+table.tasks.tasks-main td:nth-child(7) { width: 104px; }
 
 table.tasks td {
   padding: 12px 16px;
@@ -1257,7 +1270,15 @@ table.tasks td {
 
 table.tasks tr:hover td { background: var(--surface); }
 
-.task-name { color: var(--white); }
+.task-name {
+  color: var(--white);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  line-height: 1.35;
+}
 .task-done-row .task-name { text-decoration: line-through; color: var(--silver-dim); }
 .task-done-row td { opacity: 0.5; }
 .task-overdue-row td {
@@ -1281,8 +1302,9 @@ table.tasks tr:hover td { background: var(--surface); }
 
 .task-name-cell {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
+  min-width: 0;
 }
 
 .task-stale-flag {
@@ -1355,6 +1377,16 @@ table.tasks tr:hover td { background: var(--surface); }
   text-transform: uppercase;
   color: var(--silver-dim);
   white-space: nowrap;
+}
+
+.task-owner-stack {
+  display: inline-grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.task-owner-stack .task-owner-kind {
+  margin-left: 0;
 }
 
 .task-owner-kind.kind-team {
