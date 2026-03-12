@@ -1329,6 +1329,20 @@ function pipelineResearchSourceMeta(card = {}) {
   return { sourceKey, sourceLabel, sourceUrl };
 }
 
+function leadOutcomeKey(card = {}) {
+  const raw = String(card?.outcome || "").trim().toLowerCase();
+  if (raw === "won" || raw === "lost") return raw;
+  if (String(card?.status || "").trim().toLowerCase() === "closed") return "closed_unspecified";
+  return "open";
+}
+
+function leadOutcomeLabel(outcomeKey) {
+  if (outcomeKey === "won") return "Won";
+  if (outcomeKey === "lost") return "Lost";
+  if (outcomeKey === "closed_unspecified") return "Closed (Needs Outcome)";
+  return "Open";
+}
+
 function leadResearchCompanyKey(record = {}) {
   return normalizeLeadEntityKey(record.company || record.title || "");
 }
@@ -1576,6 +1590,7 @@ function buildGeneratedLeadList(cards) {
     const updatedMs = pipelineLeadUpdatedMs(card);
     const priorityScore = leadFollowUpPriorityScore(card);
     const sourceKey = leadSourceKey(card);
+    const outcomeKey = leadOutcomeKey(card);
     const ownerLabel = leadOwnerLabel(card);
     return {
       id: cardId,
@@ -1585,6 +1600,8 @@ function buildGeneratedLeadList(cards) {
       email,
       stage: String(card?.status || "leads"),
       stageLabel: pipelineStatusLabel(card?.status),
+      outcomeKey,
+      outcomeLabel: leadOutcomeLabel(outcomeKey),
       sourceKey,
       sourceLabel: leadSourceLabel(card),
       ownerUid: String(card?.ownerUid || ""),
@@ -1662,7 +1679,9 @@ function buildResearchSourceScoreRows() {
         imported: 0,
         rejected: 0,
         pipeline: 0,
-        closed: 0,
+        won: 0,
+        lost: 0,
+        closedUnspecified: 0,
         confidenceTotal: 0,
         confidenceCount: 0,
       });
@@ -1693,7 +1712,10 @@ function buildResearchSourceScoreRows() {
     if (!meta) return;
     const row = ensure(meta.sourceKey, meta.sourceLabel, meta.sourceUrl);
     row.pipeline += 1;
-    if (isPipelineLeadClosed(card)) row.closed += 1;
+    const outcomeKey = leadOutcomeKey(card);
+    if (outcomeKey === "won") row.won += 1;
+    if (outcomeKey === "lost") row.lost += 1;
+    if (outcomeKey === "closed_unspecified") row.closedUnspecified += 1;
     if (String(card.researchConfidence || "").trim()) {
       const confidence = coerceConfidenceValue(card.researchConfidence);
       row.confidenceTotal += confidence;
@@ -1706,13 +1728,13 @@ function buildResearchSourceScoreRows() {
       ? Math.round(row.confidenceTotal / row.confidenceCount)
       : 0;
     const conversionRate = row.pipeline
-      ? Math.round((row.closed / row.pipeline) * 100)
+      ? Math.round((row.won / row.pipeline) * 100)
       : 0;
     const sampleWeight = Math.min(row.pipeline, 20) / 20;
     const qualityScore = Math.round(
-      (conversionRate * 0.65)
+      (conversionRate * 0.7)
       + (avgConfidence * 0.2)
-      + (sampleWeight * 100 * 0.15)
+      + (sampleWeight * 100 * 0.1)
     );
 
     return {
@@ -1720,7 +1742,7 @@ function buildResearchSourceScoreRows() {
       avgConfidence,
       conversionRate,
       qualityScore,
-      pipelineOpen: Math.max(0, row.pipeline - row.closed),
+      pipelineOpen: Math.max(0, row.pipeline - row.won - row.lost - row.closedUnspecified),
     };
   });
 
@@ -1749,9 +1771,9 @@ function renderResearchSourceScoreSection() {
       <div class="lead-list-head">
         <div>
           <div class="lead-list-title">Research Source Quality Score</div>
-          <div class="lead-list-subtitle">Ranks directories by closed conversion proxy and confidence.</div>
+          <div class="lead-list-subtitle">Ranks directories by won conversion and confidence.</div>
         </div>
-        <div class="lead-list-subtext">Closed stage is used as the current won-deal proxy.</div>
+        <div class="lead-list-subtext">Set lead outcomes to Won or Lost for accurate conversion rankings.</div>
       </div>
       <div class="lead-list-wrap">
         <table class="lead-list-table lead-source-score-table">
@@ -1759,9 +1781,9 @@ function renderResearchSourceScoreSection() {
             <tr>
               <th>Source</th>
               <th>Score</th>
-              <th>Closed Conv.</th>
+              <th>Won Conv.</th>
+              <th>Outcomes</th>
               <th>Pipeline</th>
-              <th>Staged</th>
               <th>Avg Conf.</th>
             </tr>
           </thead>
@@ -1779,15 +1801,20 @@ function renderResearchSourceScoreSection() {
                 <td><span class="priority ${row.qualityScore >= 70 ? "p-high" : row.qualityScore >= 40 ? "p-mid" : "p-low"}">${row.qualityScore}</span></td>
                 <td>
                   <span class="lead-signal-chip">${row.conversionRate}%</span>
-                  <div class="lead-list-subtext">${row.closed} closed / ${row.pipeline} total</div>
+                  <div class="lead-list-subtext">${row.won} won / ${row.pipeline} total</div>
+                </td>
+                <td>
+                  <div class="lead-list-subtext">Won ${row.won}</div>
+                  <div class="lead-list-subtext">Lost ${row.lost}</div>
+                  ${
+                    row.closedUnspecified
+                      ? `<div class="lead-list-subtext">Needs outcome ${row.closedUnspecified}</div>`
+                      : ""
+                  }
                 </td>
                 <td>
                   <div>${row.pipeline}</div>
                   <div class="lead-list-subtext">Open ${row.pipelineOpen}</div>
-                </td>
-                <td>
-                  <div>${row.staged}</div>
-                  <div class="lead-list-subtext">Imported ${row.imported}</div>
                 </td>
                 <td>${row.avgConfidence ? `${row.avgConfidence}/100` : "-"}</td>
               </tr>
@@ -2080,7 +2107,14 @@ function renderLeadListBuilder(cards) {
                            : `<div class="lead-list-subtext">No email detected</div>`
                        }
                      </td>
-                     <td><span class="timeline-chip">${escHtml(lead.stageLabel)}</span></td>
+                     <td>
+                       <span class="timeline-chip">${escHtml(lead.stageLabel)}</span>
+                       ${
+                         lead.outcomeKey !== "open"
+                           ? `<div class="lead-list-subtext">${escHtml(lead.outcomeLabel)}</div>`
+                           : ""
+                       }
+                     </td>
                      <td><div class="lead-list-subtext">${escHtml(lead.sourceLabel)}</div></td>
                      <td>${assigneeChipHtml(lead.ownerUid, lead.ownerName, "Unassigned")}</td>
                      <td><span class="priority ${lead.priorityClass}">${escHtml(lead.priorityLabel)}</span></td>
@@ -2604,6 +2638,10 @@ function renderPipeline(cards) {
 
     visibleCards.forEach((card) => {
       const tagClass = leadServiceTagClass(card.service);
+      const outcomeKey = leadOutcomeKey(card);
+      const outcomeBadge = outcomeKey !== "open"
+        ? `<span class="lead-outcome-chip outcome-${outcomeKey}">${escHtml(leadOutcomeLabel(outcomeKey))}</span>`
+        : "";
       const ownerChip = (card.ownerUid || card.ownerName)
         ? `<div class="pipeline-owner">${assigneeChipHtml(card.ownerUid, card.ownerName)}</div>`
         : "";
@@ -2642,6 +2680,7 @@ function renderPipeline(cards) {
         ${card.company ? `<div class="card-company">${escHtml(card.company)}</div>` : ""}
         <div class="card-meta">${escHtml(card.note || "")}</div>
         <span class="card-tag ${tagClass}">${escHtml(card.service || "")}</span>
+        ${outcomeBadge}
         ${ownerChip}
         <div class="card-actions">
           ${moveButtons}
@@ -2660,8 +2699,14 @@ function clearPipelineDropTargets() {
 }
 
 window.moveCard = async function (id, newStatus) {
+  const current = currentPipeline.find((entry) => entry.id === id);
+  const nextStatus = String(newStatus || "");
+  const updates = { status: nextStatus, updatedAt: serverTimestamp() };
+  if (nextStatus !== "closed" && current?.outcome) {
+    updates.outcome = "";
+  }
   try {
-    await updateDoc(doc(db, "pipeline", id), { status: newStatus, updatedAt: serverTimestamp() });
+    await updateDoc(doc(db, "pipeline", id), updates);
   } catch (err) { console.error("moveCard:", err); }
 };
 
@@ -2687,6 +2732,7 @@ window.openLeadDetail = function (id) {
   const selectedServiceValue = leadServiceSelectValue(card.service);
   const customServiceValue = selectedServiceValue === "__other__" ? String(card.service || "") : "";
   const ownerOptions = teamAssigneeOptionsHtml(card.ownerUid || "", card.ownerName || "");
+  const currentOutcome = leadOutcomeKey(card);
 
   document.getElementById("leadDetailBody").innerHTML = `
     <div class="detail-grid">
@@ -2717,6 +2763,19 @@ window.openLeadDetail = function (id) {
         <select class="form-select" id="ld_status">${colOpts}</select>
       </div>
       <div class="form-group">
+        <label class="form-label">Lead Outcome</label>
+        <select class="form-select" id="ld_outcome">
+          <option value="" ${currentOutcome === "open" || currentOutcome === "closed_unspecified" ? "selected" : ""}>Open / Not decided</option>
+          <option value="won" ${currentOutcome === "won" ? "selected" : ""}>Won</option>
+          <option value="lost" ${currentOutcome === "lost" ? "selected" : ""}>Lost</option>
+        </select>
+        ${
+          currentOutcome === "closed_unspecified"
+            ? `<div class="request-helper">This lead is closed but missing an outcome. Set Won or Lost for conversion reporting.</div>`
+            : ""
+        }
+      </div>
+      <div class="form-group">
         <label class="form-label">Working Owner</label>
         <select class="form-select" id="ld_ownerUid">
           ${ownerOptions}
@@ -2737,6 +2796,8 @@ window.openLeadDetail = function (id) {
     syncServiceOtherField("ld_service", "ld_serviceOtherWrap", "ld_serviceOther");
   });
   syncServiceOtherField("ld_service", "ld_serviceOtherWrap", "ld_serviceOther");
+  document.getElementById("ld_status")?.addEventListener("change", syncLeadOutcomeField);
+  syncLeadOutcomeField();
 
   // Wire up delete button inside the detail modal
   const delBtn = document.getElementById("leadDetailDeleteBtn");
@@ -2756,6 +2817,11 @@ window.saveLeadDetail = async function () {
     alert("Please select a service or provide a custom service label.");
     return;
   }
+  const nextStatus = String(document.getElementById("ld_status").value || "leads");
+  const rawOutcome = String(document.getElementById("ld_outcome")?.value || "").trim().toLowerCase();
+  const nextOutcome = nextStatus === "closed" && (rawOutcome === "won" || rawOutcome === "lost")
+    ? rawOutcome
+    : "";
   const ownerUid = String(document.getElementById("ld_ownerUid").value || "");
   const ownerName = isTeamAssignmentUid(ownerUid)
     ? "Entire Team"
@@ -2768,7 +2834,8 @@ window.saveLeadDetail = async function () {
       service,
       ownerUid,
       ownerName,
-      status:    document.getElementById("ld_status").value,
+      status: nextStatus,
+      outcome: nextOutcome,
       note:      document.getElementById("ld_note").value.trim(),
       updatedAt: serverTimestamp(),
     });
@@ -2791,6 +2858,17 @@ document.getElementById("leadDetailOverlay")?.addEventListener("click", function
 document.getElementById("leadMergeOverlay")?.addEventListener("click", function (e) {
   if (e.target === this) window.closeLeadMergeAssistant();
 });
+
+function syncLeadOutcomeField() {
+  const statusEl = document.getElementById("ld_status");
+  const outcomeEl = document.getElementById("ld_outcome");
+  if (!statusEl || !outcomeEl) return;
+  const isClosed = String(statusEl.value || "") === "closed";
+  outcomeEl.disabled = !isClosed;
+  if (!isClosed) {
+    outcomeEl.value = "";
+  }
+}
 
 // ─── TASKS ────────────────────────────────────────────────────────────────────
 // Priority sort order helper
@@ -4829,6 +4907,7 @@ window.downloadLeadListCsv = function () {
     "Contact",
     "Email",
     "Stage",
+    "Outcome",
     "Source",
     "Owner",
     "Priority",
@@ -4849,6 +4928,7 @@ window.downloadLeadListCsv = function () {
     lead.contactLabel,
     lead.email,
     lead.stageLabel,
+    lead.outcomeLabel,
     lead.sourceLabel,
     lead.ownerLabel,
     lead.priorityLabel,

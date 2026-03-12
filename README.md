@@ -80,7 +80,8 @@
 ### Notes
 - Uses only public-source OpenStreetMap data with source attribution.
 - No Cloud Functions, no external backend, no Blaze-only services.
-- Team portal includes a `Research Source Quality Score` panel that ranks directories by conversion proxy (closed stage) and confidence.
+- Team portal includes a `Research Source Quality Score` panel that ranks directories by won conversion and confidence.
+- Pipeline lead detail now supports explicit `Won` / `Lost` outcome so conversion tracking can use true outcomes.
 
 ## Core Collections
 - `pipeline`

@@ -1380,6 +1380,38 @@ table.lead-list-table tr:last-child td {
 .tag-brand { background: rgba(52,152,219,0.2); color: #aed6f1; border: 1px solid rgba(52,152,219,0.35); }
 .tag-other { background: rgba(136,136,136,0.15); color: var(--silver-dim); border: 1px solid var(--border); }
 
+.lead-outcome-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 2px 8px;
+  margin-left: 6px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+}
+
+.lead-outcome-chip.outcome-won {
+  color: var(--green-soft);
+  border-color: rgba(88,214,141,0.35);
+  background: rgba(88,214,141,0.1);
+}
+
+.lead-outcome-chip.outcome-lost {
+  color: var(--red-soft);
+  border-color: rgba(236,112,99,0.35);
+  background: rgba(236,112,99,0.1);
+}
+
+.lead-outcome-chip.outcome-closed_unspecified {
+  color: var(--gold);
+  border-color: rgba(184,168,120,0.35);
+  background: rgba(184,168,120,0.1);
+}
+
 .pipeline-owner {
   margin-top: 8px;
 }

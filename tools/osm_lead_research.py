@@ -106,14 +106,31 @@ def http_json(
     data: Optional[bytes] = None,
     headers: Optional[Dict[str, str]] = None,
     timeout: int = 60,
+    retries: int = 4,
+    backoff_seconds: float = 2.0,
 ) -> object:
     req_headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     if headers:
         req_headers.update(headers)
-    req = urllib.request.Request(url, data=data, headers=req_headers, method=method)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8")
-    return json.loads(raw)
+
+    attempts = max(1, retries)
+    for attempt in range(attempts):
+        req = urllib.request.Request(url, data=data, headers=req_headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+            return json.loads(raw)
+        except urllib.error.HTTPError as err:
+            is_retryable = err.code in {429, 500, 502, 503, 504}
+            if not is_retryable or attempt >= attempts - 1:
+                raise
+            time.sleep(backoff_seconds * (2 ** attempt))
+        except urllib.error.URLError:
+            if attempt >= attempts - 1:
+                raise
+            time.sleep(backoff_seconds * (2 ** attempt))
+
+    raise RuntimeError("HTTP request failed after retries.")
 
 
 def normalize_slug(value: str) -> str:
