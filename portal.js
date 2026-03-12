@@ -485,6 +485,114 @@ function resetActionCodeSettingsForRole(role) {
   };
 }
 
+function randomProvisionPassword(length = 24) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*()-_=+";
+  const size = Math.max(12, Number(length || 24));
+  const values = new Uint32Array(size);
+  crypto.getRandomValues(values);
+  let output = "";
+  for (let i = 0; i < values.length; i += 1) {
+    output += chars[values[i] % chars.length];
+  }
+  return output;
+}
+
+function normalizeIdentityToolkitError(err) {
+  const raw = String(err?.message || err || "").trim().toUpperCase();
+  if (!raw) return "UNKNOWN";
+  if (raw.includes("EMAIL_EXISTS")) return "EMAIL_EXISTS";
+  if (raw.includes("INVALID_EMAIL")) return "INVALID_EMAIL";
+  if (raw.includes("TOO_MANY_ATTEMPTS_TRY_LATER")) return "TOO_MANY_ATTEMPTS_TRY_LATER";
+  if (raw.includes("OPERATION_NOT_ALLOWED")) return "OPERATION_NOT_ALLOWED";
+  return raw;
+}
+
+function friendlyProvisionAuthError(code) {
+  const normalized = String(code || "").toUpperCase();
+  const map = {
+    EMAIL_EXISTS: "Auth account already exists for this email.",
+    INVALID_EMAIL: "Invalid email address.",
+    TOO_MANY_ATTEMPTS_TRY_LATER: "Too many attempts. Try again shortly.",
+    OPERATION_NOT_ALLOWED: "Email/password auth is not enabled in Firebase.",
+  };
+  return map[normalized] || "Could not create Auth account automatically.";
+}
+
+async function identityToolkitRequest(path, payload) {
+  const apiKey = String(firebaseConfig?.apiKey || "").trim();
+  if (!apiKey) throw new Error("MISSING_API_KEY");
+  const endpoint = `https://identitytoolkit.googleapis.com/v1/${path}?key=${encodeURIComponent(apiKey)}`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(String(data?.error?.message || `HTTP_${response.status}`));
+  }
+  return data || {};
+}
+
+function knownManagedUidByEmail(email) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return "";
+  const linked = currentManagedUsers.find((entry) => normalizeEmail(entry.email || "") === normalized);
+  return String(linked?.id || "");
+}
+
+async function sendProvisionResetEmail(email, role) {
+  await sendPasswordResetEmail(auth, email, resetActionCodeSettingsForRole(role));
+}
+
+async function ensureProvisionAuthCredential(email, role, options = {}) {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedRole = String(role || "").toLowerCase();
+  const existingUid = String(options.existingUid || knownManagedUidByEmail(normalizedEmail));
+  const result = {
+    uid: existingUid,
+    created: false,
+    resetSent: false,
+    accountExists: Boolean(existingUid),
+    requiresManualUid: false,
+  };
+
+  if (!normalizedEmail) return result;
+  if (result.uid) return result;
+
+  try {
+    const tempPassword = randomProvisionPassword();
+    const created = await identityToolkitRequest("accounts:signUp", {
+      email: normalizedEmail,
+      password: tempPassword,
+      returnSecureToken: true,
+    });
+    result.uid = String(created?.localId || "");
+    result.created = Boolean(result.uid);
+    if (result.created) {
+      try {
+        await sendProvisionResetEmail(normalizedEmail, normalizedRole);
+        result.resetSent = true;
+      } catch (resetErr) {
+        console.error("sendProvisionResetEmail:", resetErr);
+        result.resetSent = false;
+      }
+      return result;
+    }
+    throw new Error("NO_UID_RETURNED");
+  } catch (err) {
+    const code = normalizeIdentityToolkitError(err);
+    if (code === "EMAIL_EXISTS") {
+      result.accountExists = true;
+      const knownUid = knownManagedUidByEmail(normalizedEmail);
+      result.uid = knownUid || "";
+      result.requiresManualUid = !result.uid;
+      return result;
+    }
+    throw new Error(friendlyProvisionAuthError(code));
+  }
+}
+
 // ─── REAL-TIME LISTENERS ──────────────────────────────────────────────────────
 function startListeners() {
   stopRealtimeListeners();
@@ -3336,8 +3444,8 @@ function renderClientDetailPane() {
         <input class="form-input" id="cd_email" value="${escHtmlAttr(client.email || "")}">
       </div>
       <div class="form-group">
-        <label class="form-label">Client Auth UID</label>
-        <input class="form-input" id="cd_authUid" value="${escHtmlAttr(client.authUid || "")}" placeholder="Firebase auth UID">
+        <label class="form-label">Client Auth UID (Optional Fallback)</label>
+        <input class="form-input" id="cd_authUid" value="${escHtmlAttr(client.authUid || "")}" placeholder="Auto-linked from provisioning">
       </div>
       <div class="form-group">
         <label class="form-label">Plan Name</label>
@@ -3465,15 +3573,21 @@ window.saveClientDetail = async function () {
 
   const existingClient = currentClients.find((c) => c.id === selectedClientId);
   const email = normalizeEmail(document.getElementById("cd_email").value);
-  const authUid = document.getElementById("cd_authUid").value.trim();
+  const manualAuthUid = String(document.getElementById("cd_authUid").value || "").trim();
 
   try {
+    let authSync = { uid: manualAuthUid, created: false, resetSent: false, accountExists: Boolean(manualAuthUid), requiresManualUid: false };
+    if (!manualAuthUid && email && isSuperAdminRole(currentUserRole)) {
+      authSync = await ensureProvisionAuthCredential(email, "client", { existingUid: String(existingClient?.authUid || "") });
+    }
+    const resolvedAuthUid = String(authSync.uid || "");
+
     const updates = {
       companyName: document.getElementById("cd_companyName").value.trim(),
       contactName: document.getElementById("cd_contactName").value.trim(),
       email,
       emailLower: email,
-      authUid,
+      authUid: resolvedAuthUid,
       planName: document.getElementById("cd_planName").value.trim(),
       status: document.getElementById("cd_status").value,
       recurring: document.getElementById("cd_recurring").value === "true",
@@ -3487,18 +3601,26 @@ window.saveClientDetail = async function () {
     };
     await updateDoc(doc(db, "clients", selectedClientId), updates);
 
-    if (authUid) {
-      await upsertClientUserLink(authUid, selectedClientId, email);
+    if (resolvedAuthUid) {
+      await upsertClientUserLink(resolvedAuthUid, selectedClientId, email);
     }
 
     const provisionSynced = await upsertClientProvisionRecord(
       selectedClientId,
-      { ...updates, authUid },
+      { ...updates, authUid: resolvedAuthUid },
       { previousEmail: existingClient?.email || "" }
     );
 
     if (provisionSynced) {
-      setElementStatus("managedProvisionStatus", "Client saved and provisioning updated.", false);
+    let message = "Client saved and provisioning updated.";
+    if (authSync.created && authSync.resetSent) {
+      message = `Client saved. Auth created and reset link sent to ${email}.`;
+    } else if (authSync.created && !authSync.resetSent) {
+      message = "Client saved. Auth created, but reset email failed. Use managed user reset.";
+    } else if (!manualAuthUid && authSync.accountExists && authSync.requiresManualUid) {
+      message = "Client saved. Auth account exists but UID is unresolved; user can sign in to auto-link.";
+    }
+      setElementStatus("managedProvisionStatus", message, false);
     } else {
       setElementStatus("managedProvisionStatus", "Client saved. Provisioning sync requires super admin.", false);
     }
@@ -3773,6 +3895,12 @@ async function upsertManagedProvision(data, options = {}) {
   }
 
   const status = String(data.status || "active");
+  const requestedAuthUid = String(data.authUid || "").trim();
+  const linkedUid =
+    String(options.linkedUid || "").trim()
+    || requestedAuthUid
+    || String(currentManagedUsers.find((u) => normalizeEmail(u.email || "") === email)?.id || "");
+
   await setDoc(doc(db, "login_provisioning", email), {
     email,
     role,
@@ -3780,15 +3908,12 @@ async function upsertManagedProvision(data, options = {}) {
     notes: String(data.notes || ""),
     clientId,
     status,
+    authUid: linkedUid,
     updatedAt: serverTimestamp(),
     updatedByUid: auth.currentUser?.uid || "",
     createdAt: serverTimestamp(),
     createdByUid: auth.currentUser?.uid || "",
   }, { merge: true });
-
-  const linkedUid =
-    String(options.linkedUid || "")
-    || String(currentManagedUsers.find((u) => normalizeEmail(u.email || "") === email)?.id || "");
 
   if (linkedUid) {
     await setDoc(doc(db, "users", linkedUid), {
@@ -3808,7 +3933,7 @@ async function upsertManagedProvision(data, options = {}) {
       emailLower: email,
       updatedAt: serverTimestamp(),
     };
-    const nextAuthUid = linkedUid || String(data.authUid || "");
+    const nextAuthUid = linkedUid || requestedAuthUid;
     if (nextAuthUid) clientUpdate.authUid = nextAuthUid;
     await updateDoc(doc(db, "clients", clientId), clientUpdate);
   }
@@ -3826,10 +3951,30 @@ async function handleManagedProvisionSubmit(event) {
   const clientId = document.getElementById("managedProvisionClientId")?.value || "";
   const name = document.getElementById("managedProvisionName")?.value.trim() || "";
   const notes = document.getElementById("managedProvisionNotes")?.value.trim() || "";
+  const existingProvision = currentProvisioning.find((entry) => normalizeEmail(entry.email || "") === email);
 
   try {
-    await upsertManagedProvision({ email, role, clientId, name, notes, status: "active" });
-    setElementStatus("managedProvisionStatus", "Provision saved. User can sign in once Auth account exists.", false);
+    const authSync = existingProvision
+      ? { uid: String(existingProvision.authUid || ""), created: false, resetSent: false, accountExists: Boolean(existingProvision.authUid), requiresManualUid: false }
+      : await ensureProvisionAuthCredential(email, role, { existingUid: "" });
+
+    await upsertManagedProvision(
+      { email, role, clientId, name, notes, status: "active", authUid: authSync.uid || "" },
+      { linkedUid: authSync.uid || "" }
+    );
+
+    let message = "Provision saved.";
+    if (authSync.created && authSync.resetSent) {
+      message = `Provision saved. Auth created and reset link sent to ${email}.`;
+    } else if (authSync.created && !authSync.resetSent) {
+      message = "Provision saved. Auth created, but reset email failed. Use 'Send Reset Link' from the user row.";
+    } else if (!existingProvision && authSync.accountExists && authSync.requiresManualUid) {
+      message = "Provision saved. Auth account already exists but UID could not be resolved automatically; user can sign in to auto-link.";
+    } else if (!existingProvision && authSync.accountExists) {
+      message = "Provision saved. Existing Auth account detected and linked.";
+    }
+    setElementStatus("managedProvisionStatus", message, false);
+
     document.getElementById("managedProvisionForm")?.reset();
     document.getElementById("managedProvisionRole").value = "client";
     toggleManagedProvisionClientField();
@@ -3913,11 +4058,26 @@ window.saveManagedUser = async function () {
   const status = document.getElementById("mu_status")?.value || "active";
 
   try {
+    let authSync = { uid: String(record.uid || ""), created: false, resetSent: false, accountExists: Boolean(record.uid), requiresManualUid: false };
+    if (!record.uid && status !== "disabled") {
+      authSync = await ensureProvisionAuthCredential(email, role, { existingUid: "" });
+    }
+
     await upsertManagedProvision(
-      { email, role, clientId, name, notes, status, authUid: record.uid || "" },
-      { previousEmail: record.email || "", linkedUid: record.uid || "" }
+      { email, role, clientId, name, notes, status, authUid: authSync.uid || "" },
+      { previousEmail: record.email || "", linkedUid: authSync.uid || "" }
     );
-    setElementStatus("managedUsersStatus", "Provision updated.", false);
+    let message = "Provision updated.";
+    if (authSync.created && authSync.resetSent) {
+      message = `Provision updated. Auth created and reset link sent to ${email}.`;
+    } else if (authSync.created && !authSync.resetSent) {
+      message = "Provision updated. Auth created, but reset email failed. Send reset manually from this modal.";
+    } else if (!record.uid && authSync.accountExists && authSync.requiresManualUid) {
+      message = "Provision updated. Existing Auth account detected but UID could not be resolved automatically.";
+    } else if (!record.uid && authSync.accountExists) {
+      message = "Provision updated. Existing Auth account linked.";
+    }
+    setElementStatus("managedUsersStatus", message, false);
     window.closeManagedUserModal();
   } catch (err) {
     console.error("saveManagedUser:", err);
@@ -3930,7 +4090,7 @@ window.deleteManagedUser = async function () {
   const record = managedRecordsByKey.get(editingManagedRecordKey);
   if (!record) return;
 
-  if (!confirm("Revoke this user's access? This disables provisioning and removes linked profile access.")) return;
+  if (!confirm("Revoke this user's access? This disables provisioning and removes linked profile access. (Spark mode does not auto-delete Firebase Auth credentials.)")) return;
 
   try {
     if (record.uid) {
@@ -3963,7 +4123,7 @@ window.deleteManagedUser = async function () {
       }
     }
 
-    setElementStatus("managedUsersStatus", "Access revoked.", false);
+    setElementStatus("managedUsersStatus", "Access revoked in app. Firebase Auth credential remains unless removed in backend/console.", false);
     window.closeManagedUserModal();
   } catch (err) {
     console.error("deleteManagedUser:", err);
@@ -5904,8 +6064,8 @@ function getModalForm(mode) {
         <input class="form-input" id="f_email" placeholder="contact@company.com">
       </div>
       <div class="form-group">
-        <label class="form-label">Client Auth UID</label>
-        <input class="form-input" id="f_authUid" placeholder="Firebase Auth UID">
+        <label class="form-label">Client Auth UID (Optional Fallback)</label>
+        <input class="form-input" id="f_authUid" placeholder="Leave blank to auto-create and send reset link">
       </div>
       <div class="form-group">
         <label class="form-label">Plan Name</label>
@@ -6109,13 +6269,18 @@ window.saveModal = async function () {
       const updatesRemaining = Math.max(0, Number(document.getElementById("f_updatesRemaining").value || 0));
       const contactName = document.getElementById("f_contactName").value.trim();
       const notes = document.getElementById("f_clientNotes").value.trim();
+      let authSync = { uid: authUid, created: false, resetSent: false, accountExists: Boolean(authUid), requiresManualUid: false };
+      if (!authUid && email && isSuperAdminRole(currentUserRole)) {
+        authSync = await ensureProvisionAuthCredential(email, "client", { existingUid: "" });
+      }
+      const resolvedAuthUid = String(authSync.uid || "");
 
       const clientRef = await addDoc(collection(db, "clients"), {
         companyName,
         contactName,
         email,
         emailLower: email,
-        authUid,
+        authUid: resolvedAuthUid,
         planName: document.getElementById("f_planName").value.trim(),
         recurring: document.getElementById("f_recurring").value === "true",
         paid: document.getElementById("f_paid").value === "true",
@@ -6132,19 +6297,27 @@ window.saveModal = async function () {
 
       selectedClientId = clientRef.id;
 
-      if (authUid) {
-        await upsertClientUserLink(authUid, clientRef.id, email);
+      if (resolvedAuthUid) {
+        await upsertClientUserLink(resolvedAuthUid, clientRef.id, email);
       }
 
       const provisionSynced = await upsertClientProvisionRecord(clientRef.id, {
         companyName,
         contactName,
         email,
-        authUid,
+        authUid: resolvedAuthUid,
         notes,
       });
       if (provisionSynced) {
-        setElementStatus("managedProvisionStatus", "Client created and provisioning synced.", false);
+        let message = "Client created and provisioning synced.";
+        if (authSync.created && authSync.resetSent) {
+          message = `Client created. Auth created and reset link sent to ${email}.`;
+        } else if (authSync.created && !authSync.resetSent) {
+          message = "Client created. Auth created, but reset email failed. Send reset from managed users.";
+        } else if (!authUid && authSync.accountExists && authSync.requiresManualUid) {
+          message = "Client created. Auth exists but UID could not be resolved automatically.";
+        }
+        setElementStatus("managedProvisionStatus", message, false);
       } else {
         setElementStatus("managedProvisionStatus", "Client created. Provisioning sync requires super admin.", false);
       }

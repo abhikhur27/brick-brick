@@ -23,7 +23,8 @@
 ### Why this model
 - Spark/free tier cannot safely perform privileged Auth user management from frontend.
 - Super admins manage provisioning + profile access in-app.
-- Actual Auth account creation/deletion still happens in Firebase Console.
+- Provisioning can auto-create Auth credentials + send reset links.
+- Auth deletion still requires privileged backend tooling or Firebase Console.
 
 ## Deploy
 1. `firebase login`
@@ -47,7 +48,7 @@
 ## Ongoing User Management (Spark-safe)
 1. Super admin signs into `/portal.html`.
 2. Use **Login Provisioning** section to create/update client/admin/super admin provisioning records.
-3. Create corresponding Auth user in Firebase Console (same email as provisioning record).
+3. On new provisioning, the app auto-creates Auth (random password) and sends reset link.
 4. User signs in:
    - Client panel auto-creates `users/{uid}` when linked client/provision matches.
    - Team portal auto-creates `users/{uid}` for provisioned admin/super admin.
@@ -55,7 +56,7 @@
    - Use in-app **Send Reset Link** button (super admin view).
 6. Revoke access:
    - Use in-app **Revoke Access** (disables provisioning and removes linked profile).
-   - Optionally disable/delete Auth user in Firebase Console.
+   - Optionally disable/delete Auth user in Firebase Console (or future privileged backend).
 
 ## Outbound Lead Research Workflow (Spark-safe)
 ### Option A: CSV workflow (no credentials needed)
