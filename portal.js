@@ -1248,6 +1248,87 @@ function coerceConfidenceValue(rawValue) {
   return Math.max(0, Math.min(100, Math.round(numeric)));
 }
 
+function sourceKeyFromLabelOrUrl(label, url) {
+  const normalizedLabel = String(label || "").trim().toLowerCase();
+  const normalizedUrl = String(url || "").trim().toLowerCase();
+  let base = normalizedLabel;
+
+  if (!base && normalizedUrl) {
+    try {
+      const parsed = new URL(normalizedUrl);
+      base = parsed.hostname || "";
+    } catch (_) {
+      base = normalizedUrl;
+    }
+  }
+
+  if (!base) return "public-directory";
+  return base
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/.*$/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "public-directory";
+}
+
+function sourceLabelFromUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    return String(parsed.hostname || "")
+      .replace(/^www\./i, "")
+      .trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function leadResearchSourceMeta(record = {}) {
+  const sourceUrl = toAbsoluteWebsiteUrl(
+    record.publicSourceUrl
+    || record.sourceUrl
+    || record.researchSourceUrl
+    || ""
+  );
+  const sourceLabel = String(
+    record.publicSourceLabel
+    || record.sourceLabel
+    || record.researchSourceLabel
+    || sourceLabelFromUrl(sourceUrl)
+    || "Public directory"
+  ).trim();
+  const sourceKey = String(
+    record.researchSourceKey
+    || sourceKeyFromLabelOrUrl(sourceLabel, sourceUrl)
+  ).trim() || "public-directory";
+  return { sourceKey, sourceLabel, sourceUrl };
+}
+
+function pipelineResearchSourceMeta(card = {}) {
+  const sourceRaw = String(card?.source || "").toLowerCase();
+  const hasResearchSource = sourceRaw.includes("research");
+  if (!hasResearchSource && !card?.researchSourceKey && !card?.researchSourceLabel && !card?.researchSourceUrl) {
+    return null;
+  }
+
+  let sourceLabel = String(card?.researchSourceLabel || "").trim();
+  let sourceUrl = toAbsoluteWebsiteUrl(card?.researchSourceUrl || "");
+  if (!sourceLabel || !sourceUrl) {
+    const note = String(card?.note || "");
+    const sourceMatch = note.match(/Research import source:\s*([^\n(]+?)(?:\s*\((https?:\/\/[^)]+)\))?(?:\n|$)/i);
+    if (sourceMatch) {
+      if (!sourceLabel) sourceLabel = String(sourceMatch[1] || "").trim();
+      if (!sourceUrl) sourceUrl = toAbsoluteWebsiteUrl(sourceMatch[2] || "");
+    }
+  }
+
+  if (!sourceLabel) sourceLabel = sourceLabelFromUrl(sourceUrl) || "Research import";
+  const sourceKey = String(card?.researchSourceKey || sourceKeyFromLabelOrUrl(sourceLabel, sourceUrl)).trim() || "research-import";
+  return { sourceKey, sourceLabel, sourceUrl };
+}
+
 function leadResearchCompanyKey(record = {}) {
   return normalizeLeadEntityKey(record.company || record.title || "");
 }
@@ -1261,6 +1342,8 @@ function leadSourceKey(card) {
   if (!source) return "manual";
   if (source === "website-contact-form") return "website";
   if (source.includes("website")) return "website";
+  if (source.includes("research")) return "research";
+  if (card?.researchSourceKey || card?.researchSourceLabel || card?.researchSourceUrl) return "research";
   return "manual";
 }
 
@@ -1268,6 +1351,10 @@ function leadSourceLabel(card) {
   const source = String(card?.source || "").trim();
   if (!source) return "Manual";
   if (source === "website-contact-form") return "Website Form";
+  if (leadSourceKey(card) === "research") {
+    const meta = pipelineResearchSourceMeta(card) || leadResearchSourceMeta(card);
+    return meta?.sourceLabel ? `Research · ${meta.sourceLabel}` : "Research Import";
+  }
   return source.replace(/[-_]+/g, " ");
 }
 
@@ -1436,6 +1523,7 @@ function buildGeneratedLeadList(cards) {
 
     const sourceKey = leadSourceKey(card);
     if (sourceFilter === "website" && sourceKey !== "website") return false;
+    if (sourceFilter === "research" && sourceKey !== "research") return false;
     if (sourceFilter === "manual" && sourceKey !== "manual") return false;
 
     const ownerUid = String(card?.ownerUid || "");
@@ -1558,6 +1646,159 @@ function leadResearchCandidateFromRecord(record = {}) {
   };
 }
 
+function buildResearchSourceScoreRows() {
+  const staged = Array.isArray(currentLeadResearchImports) ? currentLeadResearchImports : [];
+  const scoreMap = new Map();
+
+  const ensure = (key, label, url) => {
+    const safeKey = String(key || "public-directory").trim() || "public-directory";
+    if (!scoreMap.has(safeKey)) {
+      scoreMap.set(safeKey, {
+        key: safeKey,
+        label: String(label || "Public directory").trim() || "Public directory",
+        url: String(url || "").trim(),
+        staged: 0,
+        approved: 0,
+        imported: 0,
+        rejected: 0,
+        pipeline: 0,
+        closed: 0,
+        confidenceTotal: 0,
+        confidenceCount: 0,
+      });
+    }
+    const row = scoreMap.get(safeKey);
+    if (label && !row.label) row.label = String(label).trim();
+    if (url && !row.url) row.url = String(url).trim();
+    return row;
+  };
+
+  staged.forEach((record) => {
+    const meta = leadResearchSourceMeta(record);
+    const row = ensure(meta.sourceKey, meta.sourceLabel, meta.sourceUrl);
+    row.staged += 1;
+    const status = normalizeLeadResearchStatus(record.status);
+    if (status === "approved") row.approved += 1;
+    if (status === "imported") row.imported += 1;
+    if (status === "rejected") row.rejected += 1;
+    const confidence = coerceConfidenceValue(record.confidence);
+    if (Number.isFinite(confidence)) {
+      row.confidenceTotal += confidence;
+      row.confidenceCount += 1;
+    }
+  });
+
+  currentPipeline.forEach((card) => {
+    const meta = pipelineResearchSourceMeta(card);
+    if (!meta) return;
+    const row = ensure(meta.sourceKey, meta.sourceLabel, meta.sourceUrl);
+    row.pipeline += 1;
+    if (isPipelineLeadClosed(card)) row.closed += 1;
+    if (String(card.researchConfidence || "").trim()) {
+      const confidence = coerceConfidenceValue(card.researchConfidence);
+      row.confidenceTotal += confidence;
+      row.confidenceCount += 1;
+    }
+  });
+
+  const rows = [...scoreMap.values()].map((row) => {
+    const avgConfidence = row.confidenceCount
+      ? Math.round(row.confidenceTotal / row.confidenceCount)
+      : 0;
+    const conversionRate = row.pipeline
+      ? Math.round((row.closed / row.pipeline) * 100)
+      : 0;
+    const sampleWeight = Math.min(row.pipeline, 20) / 20;
+    const qualityScore = Math.round(
+      (conversionRate * 0.65)
+      + (avgConfidence * 0.2)
+      + (sampleWeight * 100 * 0.15)
+    );
+
+    return {
+      ...row,
+      avgConfidence,
+      conversionRate,
+      qualityScore,
+      pipelineOpen: Math.max(0, row.pipeline - row.closed),
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (b.qualityScore !== a.qualityScore) return b.qualityScore - a.qualityScore;
+    if (b.conversionRate !== a.conversionRate) return b.conversionRate - a.conversionRate;
+    if (b.pipeline !== a.pipeline) return b.pipeline - a.pipeline;
+    return a.label.localeCompare(b.label);
+  });
+  return rows.slice(0, 12);
+}
+
+function renderResearchSourceScoreSection() {
+  const rows = buildResearchSourceScoreRows();
+  if (!rows.length) {
+    return `
+      <section class="research-source-score">
+        <div class="lead-list-title">Research Source Quality Score</div>
+        <div class="lead-list-subtitle">No source performance data yet. Import staged leads to start tracking.</div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="research-source-score">
+      <div class="lead-list-head">
+        <div>
+          <div class="lead-list-title">Research Source Quality Score</div>
+          <div class="lead-list-subtitle">Ranks directories by closed conversion proxy and confidence.</div>
+        </div>
+        <div class="lead-list-subtext">Closed stage is used as the current won-deal proxy.</div>
+      </div>
+      <div class="lead-list-wrap">
+        <table class="lead-list-table lead-source-score-table">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Score</th>
+              <th>Closed Conv.</th>
+              <th>Pipeline</th>
+              <th>Staged</th>
+              <th>Avg Conf.</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td>
+                  <div class="lead-list-name">${escHtml(row.label)}</div>
+                  ${
+                    row.url
+                      ? `<a class="lead-list-email" href="${escHtmlAttr(row.url)}" target="_blank" rel="noopener noreferrer">${escHtml(sourceLabelFromUrl(row.url) || row.url)}</a>`
+                      : `<div class="lead-list-subtext">No source URL</div>`
+                  }
+                </td>
+                <td><span class="priority ${row.qualityScore >= 70 ? "p-high" : row.qualityScore >= 40 ? "p-mid" : "p-low"}">${row.qualityScore}</span></td>
+                <td>
+                  <span class="lead-signal-chip">${row.conversionRate}%</span>
+                  <div class="lead-list-subtext">${row.closed} closed / ${row.pipeline} total</div>
+                </td>
+                <td>
+                  <div>${row.pipeline}</div>
+                  <div class="lead-list-subtext">Open ${row.pipelineOpen}</div>
+                </td>
+                <td>
+                  <div>${row.staged}</div>
+                  <div class="lead-list-subtext">Imported ${row.imported}</div>
+                </td>
+                <td>${row.avgConfidence ? `${row.avgConfidence}/100` : "-"}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
 function renderLeadResearchQueueSection() {
   const imports = Array.isArray(currentLeadResearchImports) ? currentLeadResearchImports : [];
   const pendingCount = imports.filter((entry) => normalizeLeadResearchStatus(entry.status) === "pending").length;
@@ -1575,6 +1816,8 @@ function renderLeadResearchQueueSection() {
         </div>
         <div class="lead-list-actions">
           <input type="file" id="leadResearchCsvInput" accept=".csv,text/csv" style="display:none" onchange="ingestLeadResearchCsvFile(this)">
+          <button class="card-btn" type="button" onclick="downloadLeadResearchCsvTemplate()">Template</button>
+          <button class="card-btn" type="button" onclick="copyLeadResearchWorkflowCommand()">Copy Script Cmd</button>
           <button class="card-btn" type="button" onclick="triggerLeadResearchCsvPicker()">Import CSV</button>
           <button class="card-btn" type="button" onclick="importApprovedResearchLeads()" ${approvedCount ? "" : "disabled"}>Import Approved (${approvedCount})</button>
           <button class="card-btn" type="button" onclick="clearRejectedResearchLeads()" ${rejectedCount ? "" : "disabled"}>Clear Rejected (${rejectedCount})</button>
@@ -1592,6 +1835,8 @@ function renderLeadResearchQueueSection() {
       <div class="lead-research-guardrail">
         Guardrails: import only publicly available business data with a source URL or source label. Do not upload personal sensitive data.
       </div>
+
+      ${renderResearchSourceScoreSection()}
 
       ${
         leadResearchStatusMessage
@@ -1618,8 +1863,9 @@ function renderLeadResearchQueueSection() {
                      const status = normalizeLeadResearchStatus(entry.status);
                      const candidate = leadResearchCandidateFromRecord(entry);
                      const brief = buildLeadSalesBrief(candidate);
-                     const sourceUrl = toAbsoluteWebsiteUrl(entry.publicSourceUrl || entry.sourceUrl || "");
-                     const sourceLabel = String(entry.publicSourceLabel || entry.sourceLabel || "Public directory");
+                     const sourceMeta = leadResearchSourceMeta(entry);
+                     const sourceUrl = sourceMeta.sourceUrl;
+                     const sourceLabel = sourceMeta.sourceLabel;
                      const confidence = coerceConfidenceValue(entry.confidence);
                      const confidenceClass = confidence >= 70 ? "p-high" : confidence >= 40 ? "p-mid" : "p-low";
                      return `
@@ -1627,6 +1873,11 @@ function renderLeadResearchQueueSection() {
                          <td>
                            <div class="lead-list-name">${escHtml(candidate.title)}</div>
                            <div class="lead-list-subtext">${escHtml(candidate.company || "No company")} | ${escHtml(entry.email || "No email")}</div>
+                           ${
+                             [entry.city, entry.state, entry.country].filter(Boolean).length
+                               ? `<div class="lead-list-subtext">${escHtml([entry.city, entry.state, entry.country].filter(Boolean).join(", "))}</div>`
+                               : ""
+                           }
                            <div class="lead-list-subtext">${escHtml(entry.note || "No qualification notes")}</div>
                          </td>
                          <td>
@@ -1683,6 +1934,7 @@ function renderLeadListBuilder(cards) {
   generatedLeadList = leadList;
   const uniqueEmails = [...new Set(leadList.map((lead) => lead.email).filter(Boolean))];
   const websiteCount = leadList.filter((lead) => lead.sourceKey === "website").length;
+  const researchCount = leadList.filter((lead) => lead.sourceKey === "research").length;
   const highPriorityCount = leadList.filter((lead) => lead.priorityScore >= 70).length;
   const unassignedCount = leadList.filter((lead) => lead.unassigned).length;
   const callNowCount = leadList.filter((lead) =>
@@ -1721,6 +1973,7 @@ function renderLeadListBuilder(cards) {
         <select class="form-select" onchange="updateLeadListFilter('source', this.value)">
           <option value="all" ${leadListFilters.source === "all" ? "selected" : ""}>All Sources</option>
           <option value="website" ${leadListFilters.source === "website" ? "selected" : ""}>Website Form</option>
+          <option value="research" ${leadListFilters.source === "research" ? "selected" : ""}>Research Imports</option>
           <option value="manual" ${leadListFilters.source === "manual" ? "selected" : ""}>Manual / Team Added</option>
         </select>
       </div>
@@ -1779,6 +2032,7 @@ function renderLeadListBuilder(cards) {
     <div class="lead-list-metrics">
       <span class="lead-list-pill">Results <strong>${leadList.length}</strong></span>
       <span class="lead-list-pill">Website <strong>${websiteCount}</strong></span>
+      <span class="lead-list-pill">Research <strong>${researchCount}</strong></span>
       <span class="lead-list-pill">Priority High <strong>${highPriorityCount}</strong></span>
       <span class="lead-list-pill">Unassigned <strong>${unassignedCount}</strong></span>
       <span class="lead-list-pill">Call Now <strong>${callNowCount}</strong></span>
@@ -4048,6 +4302,70 @@ window.attachSalesBriefToLead = async function (leadId) {
   }
 };
 
+window.downloadLeadResearchCsvTemplate = function () {
+  const headers = [
+    "title",
+    "company",
+    "contact",
+    "email",
+    "phone",
+    "website",
+    "source",
+    "sourceUrl",
+    "serviceHint",
+    "notes",
+    "confidence",
+    "city",
+    "state",
+    "country",
+  ];
+  const sample = [
+    "Northside Dental",
+    "Northside Dental",
+    "Practice Manager",
+    "hello@northsidedental.example",
+    "(555) 010-2040",
+    "https://northsidedental.example",
+    "OpenStreetMap",
+    "https://www.openstreetmap.org/node/123456789",
+    "Website Build",
+    "No booking automation on website; likely fit for website + workflow upgrade.",
+    "72",
+    "Austin",
+    "TX",
+    "USA",
+  ];
+  const csv = [headers.join(","), sample.map((value) => `"${String(value).replace(/"/g, "\"\"")}"`).join(",")].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = "lead-research-template.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(href);
+  setLeadResearchStatus("Lead research CSV template downloaded.", false);
+};
+
+window.copyLeadResearchWorkflowCommand = async function () {
+  const command = [
+    "python tools/osm_lead_research.py",
+    "--city \"Austin\"",
+    "--state \"TX\"",
+    "--categories dentist,plumber,hvac,roofing",
+    "--max-results-per-category 40",
+    "--output-csv exports/austin-research.csv",
+  ].join(" ");
+  try {
+    await navigator.clipboard.writeText(command);
+    setLeadResearchStatus("Script command copied. Run it in terminal, then import the generated CSV.", false);
+  } catch (err) {
+    console.error("copyLeadResearchWorkflowCommand:", err);
+    setLeadResearchStatus(`Run this command: ${command}`, false);
+  }
+};
+
 window.triggerLeadResearchCsvPicker = function () {
   const input = document.getElementById("leadResearchCsvInput");
   if (!input) {
@@ -4114,9 +4432,13 @@ window.ingestLeadResearchCsvFile = async function (inputEl) {
       const website = toAbsoluteWebsiteUrl(pickCsvValue(entry, ["website", "domain", "site", "web", "companywebsite"]));
       const sourceLabel = pickCsvValue(entry, ["source", "directory", "platform", "sourcelabel", "list"]);
       const sourceUrl = toAbsoluteWebsiteUrl(pickCsvValue(entry, ["sourceurl", "listingurl", "profileurl", "link"]));
+      const sourceKey = sourceKeyFromLabelOrUrl(sourceLabel, sourceUrl);
       const serviceHint = pickCsvValue(entry, ["service", "servicehint", "need", "needs", "category", "interest"]);
       const note = pickCsvValue(entry, ["notes", "note", "qualification", "qualificationnotes", "context", "painpoint", "details", "summary"]);
       const confidence = coerceConfidenceValue(pickCsvValue(entry, ["confidence", "score", "fit", "opportunityscore", "leadscore"]));
+      const city = pickCsvValue(entry, ["city", "locationcity", "town"]);
+      const state = pickCsvValue(entry, ["state", "province", "region"]);
+      const country = pickCsvValue(entry, ["country", "nation"]);
 
       if (!title) {
         skippedInvalid += 1;
@@ -4148,6 +4470,10 @@ window.ingestLeadResearchCsvFile = async function (inputEl) {
         confidence,
         publicSourceLabel: sourceLabel,
         publicSourceUrl: sourceUrl,
+        researchSourceKey: sourceKey,
+        city,
+        state,
+        country,
         sourceFile: file.name,
         status: "pending",
         createdAt: serverTimestamp(),
@@ -4252,11 +4578,17 @@ async function importResearchLeadRecord(record) {
 
   const candidate = leadResearchCandidateFromRecord(record);
   const brief = buildLeadSalesBrief(candidate);
-  const sourceLabel = String(record.publicSourceLabel || record.sourceLabel || "Public source");
-  const sourceUrl = toAbsoluteWebsiteUrl(record.publicSourceUrl || record.sourceUrl || "");
+  const sourceMeta = leadResearchSourceMeta(record);
+  const sourceLabel = sourceMeta.sourceLabel;
+  const sourceUrl = sourceMeta.sourceUrl;
+  const sourceKey = sourceMeta.sourceKey;
+  const confidence = coerceConfidenceValue(record.confidence);
   const noteParts = [
     `Research import source: ${sourceLabel}${sourceUrl ? ` (${sourceUrl})` : ""}`,
-    `Confidence: ${coerceConfidenceValue(record.confidence)}/100`,
+    `Confidence: ${confidence}/100`,
+    [record.city, record.state, record.country].filter(Boolean).join(", ")
+      ? `Location: ${[record.city, record.state, record.country].filter(Boolean).join(", ")}`
+      : "",
     record.note ? `Research notes: ${record.note}` : "",
     `Sales brief:\n- Recommended Service: ${brief.recommendedService}\n- Opportunity: ${brief.opportunityLabel} (${brief.score}/100)\n- Outreach Angle: ${brief.outreachAngle}\n- Summary: ${brief.summary}`,
   ].filter(Boolean);
@@ -4270,7 +4602,13 @@ async function importResearchLeadRecord(record) {
     ownerUid: TEAM_ASSIGNMENT_UID,
     ownerName: "Entire Team",
     status: "leads",
-    source: "research-import",
+    source: `research-${sourceKey}`,
+    researchSourceKey: sourceKey,
+    researchSourceLabel: sourceLabel,
+    researchSourceUrl: sourceUrl,
+    researchConfidence: confidence,
+    researchImportId: id,
+    researchImportedAt: serverTimestamp(),
     note: noteParts.join("\n\n"),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),

@@ -1,1 +1,3 @@
 .firebase/
+exports/
+__pycache__/

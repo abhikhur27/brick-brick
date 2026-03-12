@@ -57,6 +57,31 @@
    - Use in-app **Revoke Access** (disables provisioning and removes linked profile).
    - Optionally disable/delete Auth user in Firebase Console.
 
+## Outbound Lead Research Workflow (Spark-safe)
+### Option A: CSV workflow (no credentials needed)
+1. Run the city research script:
+   - `python tools/osm_lead_research.py --city "Austin" --state "TX" --categories dentist,plumber,hvac --max-results-per-category 40`
+2. This writes a CSV into `exports/`.
+3. In `/portal.html` -> Pipeline -> Lead List Generator -> Public-Source Lead Research Intake:
+   - click `Import CSV`
+   - review rows
+   - `Approve` then `Import`
+
+### Option B: Direct Firestore ingest (still Spark-safe)
+1. Export local env vars (PowerShell example):
+   - `$env:BRICKBRICK_FIREBASE_PROJECT_ID="your-project-id"`
+   - `$env:BRICKBRICK_FIREBASE_API_KEY="your-web-api-key"`
+   - `$env:BRICKBRICK_FIREBASE_EMAIL="admin@yourdomain.com"`
+   - `$env:BRICKBRICK_FIREBASE_PASSWORD="your-password"`
+2. Run:
+   - `python tools/osm_lead_research.py --city "Austin" --state "TX" --categories dentist,plumber,hvac --ingest-firestore`
+3. Script signs in using Firebase Auth REST and writes staged rows to `lead_research_imports`.
+
+### Notes
+- Uses only public-source OpenStreetMap data with source attribution.
+- No Cloud Functions, no external backend, no Blaze-only services.
+- Team portal includes a `Research Source Quality Score` panel that ranks directories by conversion proxy (closed stage) and confidence.
+
 ## Core Collections
 - `pipeline`
 - `tasks`
@@ -66,3 +91,4 @@
 - `users`
 - `login_provisioning`
 - `contact_submissions`
+- `lead_research_imports`
