@@ -44,6 +44,9 @@ const TEAM_ASSIGNMENT_UID = "__team__";
 const OTHER_ASSIGNMENT_UID = "__other__";
 const TEAM_RESET_RETURN_URL = new URL("/reset-password.html?portal=team", window.location.origin).toString();
 const CLIENT_RESET_RETURN_URL = new URL("/reset-password.html?portal=client", window.location.origin).toString();
+const DEFAULT_CLIENT_REQUEST_UPDATE_WEBHOOK_URL = "https://hook.us2.make.com/6r8c9mwbh7yfej1erffgpidbwsfy8mmw";
+const CLIENT_REQUEST_UPDATE_WEBHOOK_STORAGE_KEY = "bb_client_request_update_webhook_url";
+const CLIENT_PORTAL_URL = new URL("/client.html", window.location.origin).toString();
 
 // ─── STATE CACHES (updated by real-time listeners) ───────────────────────────
 let currentPipeline  = [];
@@ -4346,6 +4349,211 @@ function makeRequestTimelineEntry({ kind = "note", status = "", text = "", visib
   };
 }
 
+function requestPriorityLabel(priority) {
+  const normalized = String(priority || "normal").toLowerCase();
+  if (normalized === "high") return "High";
+  if (normalized === "low") return "Low";
+  return "Normal";
+}
+
+function requestCategoryLabel(category) {
+  return String(category || "general")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function requestUpdateWebhookUrl() {
+  try {
+    const override = String(window.localStorage.getItem(CLIENT_REQUEST_UPDATE_WEBHOOK_STORAGE_KEY) || "").trim();
+    if (override) return override;
+  } catch (err) {
+    console.warn("requestUpdateWebhookUrl localStorage read failed:", err);
+  }
+  return DEFAULT_CLIENT_REQUEST_UPDATE_WEBHOOK_URL;
+}
+
+function buildClientRequestUpdateEmailPayload(req, options = {}) {
+  const status = String(options.status || req.status || "submitted");
+  const priority = String(options.priority || req.priority || "normal");
+  const headline = String(options.headline || "Your request has a new update").trim();
+  const summary = String(options.summary || "Our team posted an update to your request.").trim();
+  const clientMessage = String(options.clientMessage || "").trim();
+  const changeList = Array.isArray(options.changeList)
+    ? options.changeList.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 8)
+    : [];
+  const requestTitle = String(req.title || "Client request").trim() || "Client request";
+  const clientName = String(req.clientName || "there").trim() || "there";
+  const toEmail = normalizeEmail(req.clientEmail || "");
+  const actor = String(options.actor || auth.currentUser?.email || "BrickBrick Team").trim() || "BrickBrick Team";
+  const statusLabel = requestStatusLabel(status);
+  const priorityLabel = requestPriorityLabel(priority);
+  const categoryLabel = requestCategoryLabel(req.category);
+  const sentAt = new Date();
+  const sentAtIso = sentAt.toISOString();
+  const sentAtLabel = sentAt.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const subject = `[BrickBrick] ${headline} - ${requestTitle}`;
+  const preheader = [summary, clientMessage].filter(Boolean).join(" ").slice(0, 200);
+
+  const html = `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#050a12;color:#d9e4f7;font-family:'Segoe UI',Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#050a12;padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:680px;background:#0b1320;border:1px solid #22334f;border-radius:16px;overflow:hidden;">
+            <tr>
+              <td style="padding:22px 24px;background:linear-gradient(145deg,#0b1320,#14243c);border-bottom:1px solid #22334f;">
+                <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#8ea7c8;margin-bottom:10px;">BrickBrick | Client Request Update</div>
+                <div style="font-size:24px;line-height:1.25;font-weight:700;color:#f7fbff;">${escHtml(headline)}</div>
+                <div style="margin-top:10px;font-size:13px;line-height:1.5;color:#b7c8de;">${escHtml(summary)}</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:22px 24px;">
+                <div style="font-size:14px;color:#d9e4f7;margin-bottom:14px;">Hi ${escHtml(clientName)}, here is the latest update on your request:</div>
+                <div style="padding:14px;border:1px solid #243753;border-radius:12px;background:#0e1929;margin-bottom:16px;">
+                  <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#8ea7c8;margin-bottom:8px;">Request</div>
+                  <div style="font-size:19px;line-height:1.35;color:#f7fbff;font-weight:600;">${escHtml(requestTitle)}</div>
+                </div>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:16px;">
+                  <tr>
+                    <td style="padding:8px 0;font-size:12px;color:#8ea7c8;text-transform:uppercase;letter-spacing:1.2px;">Status</td>
+                    <td align="right" style="padding:8px 0;font-size:14px;color:#9dd3ff;">${escHtml(statusLabel)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:8px 0;font-size:12px;color:#8ea7c8;text-transform:uppercase;letter-spacing:1.2px;">Priority</td>
+                    <td align="right" style="padding:8px 0;font-size:14px;color:#9dd3ff;">${escHtml(priorityLabel)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:8px 0;font-size:12px;color:#8ea7c8;text-transform:uppercase;letter-spacing:1.2px;">Category</td>
+                    <td align="right" style="padding:8px 0;font-size:14px;color:#9dd3ff;">${escHtml(categoryLabel)}</td>
+                  </tr>
+                </table>
+                ${
+                  changeList.length
+                    ? `<div style="margin-bottom:16px;">
+                         <div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#8ea7c8;margin-bottom:8px;">What changed</div>
+                         <ul style="margin:0;padding-left:18px;color:#d9e4f7;">
+                           ${changeList.map((line) => `<li style="margin-bottom:6px;line-height:1.45;">${escHtml(line)}</li>`).join("")}
+                         </ul>
+                       </div>`
+                    : ""
+                }
+                ${
+                  clientMessage
+                    ? `<div style="padding:14px;border:1px solid #24486c;border-radius:12px;background:#0a2036;color:#d6edff;line-height:1.55;margin-bottom:16px;">
+                         ${escHtml(clientMessage)}
+                       </div>`
+                    : ""
+                }
+                <div style="margin:20px 0 10px;">
+                  <a href="${escHtmlAttr(CLIENT_PORTAL_URL)}" style="display:inline-block;padding:11px 16px;border-radius:10px;background:#2f8cff;color:#ffffff;text-decoration:none;font-size:13px;font-weight:600;letter-spacing:0.5px;">Open Client Portal</a>
+                </div>
+                <div style="margin-top:12px;font-size:12px;color:#8ea7c8;">Updated by ${escHtml(actor)} on ${escHtml(sentAtLabel)}.</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:14px 24px;border-top:1px solid #22334f;background:#0a101b;font-size:11px;color:#8ea7c8;line-height:1.5;">
+                Need help or changes? Reply to this email and we will route it to your delivery team.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+
+  const textLines = [
+    "BrickBrick - Client Request Update",
+    "",
+    `Hi ${clientName},`,
+    headline,
+    summary,
+    "",
+    `Request: ${requestTitle}`,
+    `Status: ${statusLabel}`,
+    `Priority: ${priorityLabel}`,
+    `Category: ${categoryLabel}`,
+    "",
+    ...(changeList.length ? ["What changed:", ...changeList.map((line) => `- ${line}`), ""] : []),
+    ...(clientMessage ? [`Team note: ${clientMessage}`, ""] : []),
+    `Open Client Portal: ${CLIENT_PORTAL_URL}`,
+    `Updated by: ${actor}`,
+    `Sent: ${sentAtLabel}`,
+  ];
+
+  return {
+    eventType: "client_request_update",
+    source: "team-portal",
+    email: toEmail,
+    toEmail,
+    name: clientName,
+    subject,
+    html,
+    text: textLines.join("\n"),
+    preheader,
+    requestId: String(req.id || ""),
+    requestTitle,
+    clientId: String(req.clientId || ""),
+    clientName,
+    status,
+    priority,
+    category: String(req.category || ""),
+    actor,
+    sentAtIso,
+  };
+}
+
+async function sendClientRequestUpdateEmail(req, options = {}) {
+  const toEmail = normalizeEmail(req?.clientEmail || "");
+  if (!toEmail) return { sent: false, reason: "missing-client-email" };
+
+  const webhookUrl = String(requestUpdateWebhookUrl() || "").trim();
+  if (!webhookUrl) return { sent: false, reason: "missing-webhook-url" };
+
+  const payload = buildClientRequestUpdateEmailPayload(
+    { ...req, clientEmail: toEmail },
+    options
+  );
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(`Webhook request failed with status ${response.status}`);
+    }
+    return { sent: true, reason: "ok" };
+  } catch (err) {
+    console.warn("sendClientRequestUpdateEmail failed:", err);
+    return { sent: false, reason: String(err?.message || "webhook-request-failed") };
+  }
+}
+
+async function getFreshClientRequestById(requestId) {
+  const id = String(requestId || "");
+  if (!id) return null;
+  const cached = currentClientRequests.find((item) => item.id === id);
+  if (cached) return cached;
+  try {
+    const snap = await getDoc(doc(db, "client_requests", id));
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  } catch (err) {
+    console.warn("getFreshClientRequestById failed:", err);
+    return null;
+  }
+}
+
 function hasActiveForgeLaneCard(req) {
   const flowId = String(req?.clientPipelineId || req?.pipelineId || "");
   if (!flowId) return false;
@@ -5371,6 +5579,24 @@ window.moveClientFlowCard = async function (id, nextStatus) {
 
       try {
         await updateDoc(doc(db, "client_requests", requestId), updates);
+        const requestForEmail = {
+          ...(linkedRequest || await getFreshClientRequestById(requestId) || {}),
+          id: requestId,
+          status: mappedStatus,
+        };
+        const emailResult = await sendClientRequestUpdateEmail(requestForEmail, {
+          status: mappedStatus,
+          headline: `Request moved to ${flowStageLabel(nextStatus)}`,
+          summary: "Your project request moved forward in our internal delivery lane.",
+          clientMessage: `Forge Lane update: moved to ${flowStageLabel(nextStatus)}.`,
+          changeList: [
+            `Forge Lane stage: ${flowStageLabel(nextStatus)}`,
+            `Status: ${requestStatusLabel(mappedStatus)}`,
+          ],
+        });
+        if (!emailResult.sent) {
+          console.warn("moveClientFlowCard email skipped:", emailResult.reason);
+        }
       } catch (syncErr) {
         console.error("moveClientFlowCard request sync:", syncErr);
       }
@@ -5403,6 +5629,21 @@ window.deleteClientFlowCard = async function (id) {
       };
       try {
         await updateDoc(doc(db, "client_requests", requestId), updates);
+        const linkedRequest = await getFreshClientRequestById(requestId);
+        if (linkedRequest) {
+          const emailResult = await sendClientRequestUpdateEmail(linkedRequest, {
+            headline: "Request moved out of active build lane",
+            summary: "Your request was moved out of Forge Lane while we re-plan the next delivery step.",
+            clientMessage: "We moved your request out of Forge Lane and will continue coordinating the next action.",
+            changeList: [
+              "Forge Lane stage: removed from board",
+              `Status: ${requestStatusLabel(String(linkedRequest.status || "submitted"))}`,
+            ],
+          });
+          if (!emailResult.sent) {
+            console.warn("deleteClientFlowCard email skipped:", emailResult.reason);
+          }
+        }
       } catch (syncErr) {
         console.error("deleteClientFlowCard request sync:", syncErr);
       }
@@ -5525,6 +5766,39 @@ window.saveRequestDetail = async function () {
     : (nextOwnerUid ? resolveTeamUserName(nextOwnerUid, "") : "");
   const internalNotes = document.getElementById("rd_internalNotes").value.trim();
   const clientUpdate = document.getElementById("rd_clientUpdate").value.trim();
+  const prevPriority = String(req.priority || "normal");
+  const prevStatus = String(req.status || "submitted");
+  const prevOwnerUid = String(req.ownerUid || "");
+  const prevOwnerName = String(req.ownerName || "");
+  const prevInternalNotes = String(req.internalNotes || "");
+  const changedDetails = [];
+
+  if (nextPriority !== prevPriority) {
+    changedDetails.push(`Priority: ${requestPriorityLabel(prevPriority)} -> ${requestPriorityLabel(nextPriority)}`);
+  }
+  if (nextStatus !== prevStatus) {
+    changedDetails.push(`Status: ${requestStatusLabel(prevStatus)} -> ${requestStatusLabel(nextStatus)}`);
+  }
+  if (nextOwnerUid !== prevOwnerUid) {
+    const oldOwnerLabel = prevOwnerUid
+      ? (isTeamAssignmentUid(prevOwnerUid) ? "Entire Team" : (prevOwnerName || resolveTeamUserName(prevOwnerUid, "")))
+      : "Unassigned";
+    const nextOwnerLabel = nextOwnerUid
+      ? (isTeamAssignmentUid(nextOwnerUid) ? "Entire Team" : nextOwnerName)
+      : "Unassigned";
+    changedDetails.push(`Owner: ${oldOwnerLabel} -> ${nextOwnerLabel}`);
+  }
+  if (internalNotes !== prevInternalNotes) {
+    changedDetails.push("Internal coordination notes updated");
+  }
+  if (clientUpdate) {
+    changedDetails.push("Client-facing timeline note added");
+  }
+
+  if (!changedDetails.length) {
+    alert("No changes to save yet.");
+    return;
+  }
 
   const updates = {
     priority: nextPriority,
@@ -5575,6 +5849,32 @@ window.saveRequestDetail = async function () {
 
   try {
     await updateDoc(doc(db, "client_requests", editingRequestId), updates);
+    const emailResult = await sendClientRequestUpdateEmail(
+      {
+        ...req,
+        id: editingRequestId,
+        priority: nextPriority,
+        status: nextStatus,
+        ownerUid: nextOwnerUid,
+        ownerName: nextOwnerName,
+        internalNotes,
+      },
+      {
+        status: nextStatus,
+        priority: nextPriority,
+        headline: nextStatus !== prevStatus
+          ? `Status update: ${requestStatusLabel(nextStatus)}`
+          : "Your request has a new update",
+        summary: clientUpdate
+          ? "Our team posted a direct note for your request."
+          : "Our team updated your request details and internal delivery context.",
+        clientMessage: clientUpdate,
+        changeList: changedDetails,
+      }
+    );
+    if (!emailResult.sent) {
+      console.warn("saveRequestDetail email skipped:", emailResult.reason);
+    }
     closeRequestDetail();
   } catch (err) {
     console.error("saveRequestDetail:", err);
@@ -5606,6 +5906,29 @@ window.toggleArchiveRequest = async function () {
         })
       ),
     });
+    const emailResult = await sendClientRequestUpdateEmail(
+      {
+        ...req,
+        id: editingRequestId,
+        archived: archiveNext,
+      },
+      {
+        headline: archiveNext ? "Your request was archived" : "Your request was restored",
+        summary: archiveNext
+          ? "Your request was archived in our workspace. Reply if you need it reopened."
+          : "Your request is active again and back in our working queue.",
+        clientMessage: archiveNext
+          ? "Your request was archived by our team after review."
+          : "Your request was restored and is now active again.",
+        changeList: [
+          `Archive state: ${archiveNext ? "Archived" : "Active"}`,
+          `Status: ${requestStatusLabel(String(req.status || "submitted"))}`,
+        ],
+      }
+    );
+    if (!emailResult.sent) {
+      console.warn("toggleArchiveRequest email skipped:", emailResult.reason);
+    }
     closeRequestDetail();
   } catch (err) {
     console.error("toggleArchiveRequest:", err);
@@ -5667,6 +5990,27 @@ window.pushRequestToPipeline = async function () {
       ),
       updatedAt: serverTimestamp(),
     });
+
+    const emailResult = await sendClientRequestUpdateEmail(
+      {
+        ...req,
+        status: "in_review",
+        clientPipelineId: flowRef.id,
+      },
+      {
+        status: "in_review",
+        headline: "Your request entered Forge Lane",
+        summary: "Your request is now in production planning inside our delivery lane.",
+        clientMessage: "Moved into Forge Lane queue for production planning.",
+        changeList: [
+          "Forge Lane stage: Queued",
+          "Status: In Review",
+        ],
+      }
+    );
+    if (!emailResult.sent) {
+      console.warn("pushRequestToPipeline email skipped:", emailResult.reason);
+    }
 
     const pushBtn = document.getElementById("requestPushBtn");
     if (pushBtn) {

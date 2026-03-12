@@ -94,3 +94,26 @@
 - `login_provisioning`
 - `contact_submissions`
 - `lead_research_imports`
+
+## Client Request Update Emails (Spark-safe)
+- Team portal updates on `client_requests` now trigger a webhook payload for transactional client emails.
+- Default webhook: the same Make webhook used for inbound form alerts.
+- Optional override per browser session:
+  - `localStorage.setItem("bb_client_request_update_webhook_url", "https://hook.us2.make.com/your-request-update-hook")`
+
+### Payload Highlights
+- `eventType: "client_request_update"`
+- `email` / `toEmail`
+- `subject`
+- `html` (styled email body)
+- `text` (plain-text fallback)
+- Request metadata (`requestId`, `clientId`, `status`, `priority`, `category`)
+
+### Make/Zap Flow
+1. Trigger on custom webhook.
+2. Filter route: `eventType == client_request_update`.
+3. Send email using:
+   - To: `toEmail`
+   - Subject: `subject`
+   - HTML Body: `html`
+   - Text Body: `text`
