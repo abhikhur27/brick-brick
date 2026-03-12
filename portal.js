@@ -4414,7 +4414,7 @@ function renderClientRequestsAdmin(requests) {
         <div class="request-title-text">${escHtml(req.title || "Untitled request")}</div>
         ${unpaidBadge ? `<div class="request-title-meta">${unpaidBadge}</div>` : ""}
       </td>
-      <td>${escHtml(req.category || "general")}</td>
+      <td class="request-category-cell">${escHtml(req.category || "general")}</td>
       <td>${escHtml(req.priority || "normal")}</td>
       <td>${ownerCell}</td>
       <td>${statusPill}</td>
@@ -4444,13 +4444,27 @@ function renderClientFlowBoard(cards) {
 
     const container = columnEl.querySelector(`#flow-col-${key}`);
     columnCards.forEach((card) => {
+      const linkedRequestId = String(card.requestId || "");
       const moveButtons = CLIENT_FLOW_COLS
         .filter((c) => c.key !== key)
-        .map((c) => `<button class="card-btn" onclick="moveClientFlowCard('${card.id}','${c.key}')">${c.label}</button>`)
+        .map((c) => `<button class="card-btn" onclick="event.stopPropagation();moveClientFlowCard('${card.id}','${c.key}')">${c.label}</button>`)
         .join("");
 
       const cardEl = document.createElement("div");
       cardEl.className = "card client-flow-card";
+      cardEl.tabIndex = linkedRequestId ? 0 : -1;
+      if (linkedRequestId) {
+        cardEl.classList.add("is-clickable");
+        cardEl.setAttribute("role", "button");
+        cardEl.setAttribute("aria-label", `Open request ${String(card.requestTitle || card.title || "request")}`);
+        cardEl.addEventListener("click", () => openRequestDetail(linkedRequestId));
+        cardEl.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openRequestDetail(linkedRequestId);
+          }
+        });
+      }
       cardEl.innerHTML = `
         <div class="card-title">${escHtml(card.title || "Untitled request")}</div>
         <div class="card-company">${escHtml(card.clientName || "Unknown client")}</div>
@@ -4458,7 +4472,7 @@ function renderClientFlowBoard(cards) {
         ${card.description ? `<div class="client-flow-note">${escHtml(card.description).slice(0, 180)}</div>` : ""}
         <div class="card-actions">
           ${moveButtons}
-          <button class="card-btn delete" onclick="deleteClientFlowCard('${card.id}')">✕</button>
+          <button class="card-btn delete" onclick="event.stopPropagation();deleteClientFlowCard('${card.id}')">✕</button>
         </div>
       `;
       container.appendChild(cardEl);
@@ -6401,6 +6415,7 @@ toggleManagedProvisionClientField();
 populateManagedClientOptions();
 window.setManagedUsersFilter("client");
 renderMyWorkDashboard();
+
 
 
 

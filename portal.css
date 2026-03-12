@@ -1900,8 +1900,10 @@ table.tasks.requests-table {
 
 table.tasks.requests-table th:nth-child(1),
 table.tasks.requests-table td:nth-child(1) { width: 170px; }
+table.tasks.requests-table th:nth-child(2),
+table.tasks.requests-table td:nth-child(2) { width: 36%; }
 table.tasks.requests-table th:nth-child(3),
-table.tasks.requests-table td:nth-child(3) { width: 150px; }
+table.tasks.requests-table td:nth-child(3) { width: 170px; }
 table.tasks.requests-table th:nth-child(4),
 table.tasks.requests-table td:nth-child(4) { width: 110px; }
 table.tasks.requests-table th:nth-child(5),
@@ -1920,6 +1922,12 @@ table.tasks.requests-table td:nth-child(7) { width: 96px; }
   outline-offset: -1px;
 }
 
+.request-category-cell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .client-flow-board {
   gap: 10px;
 }
@@ -1936,6 +1944,21 @@ table.tasks.requests-table td:nth-child(7) { width: 96px; }
   transform: none;
   box-shadow: none;
   border-color: var(--border);
+}
+
+.client-flow-card.is-clickable {
+  cursor: pointer;
+}
+
+.client-flow-card.is-clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.26);
+  border-color: var(--silver-dim);
+}
+
+.client-flow-card.is-clickable:focus-visible {
+  outline: 1px solid var(--silver-dim);
+  outline-offset: -1px;
 }
 
 .client-flow-note {
