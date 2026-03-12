@@ -4377,13 +4377,24 @@ function renderClientRequestsAdmin(requests) {
     const message = showArchivedRequests
       ? "No client requests yet."
       : "No active client requests. Use \"Show Archived\" to view history.";
-    body.innerHTML = `<tr><td colspan="8"><div class="empty-state" style="margin:24px 0">${message}</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state" style="margin:24px 0">${message}</div></td></tr>`;
     return;
   }
 
   visibleRequests.forEach((req) => {
     const tr = document.createElement("tr");
+    tr.classList.add("request-row");
     if (req.archived === true) tr.classList.add("request-row-archived");
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    tr.setAttribute("aria-label", `Open request ${String(req.title || "Untitled request")}`);
+    tr.addEventListener("click", () => openRequestDetail(req.id));
+    tr.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openRequestDetail(req.id);
+      }
+    });
     const updatedDate = req.updatedAt?.toDate
       ? req.updatedAt.toDate().toLocaleDateString("en-US", { month: "short", day: "numeric" })
       : (req.createdAt?.toDate
@@ -4400,7 +4411,7 @@ function renderClientRequestsAdmin(requests) {
     tr.innerHTML = `
       <td>${escHtml(req.clientName || "Unknown")}</td>
       <td class="request-title-cell">
-        <div>${escHtml(req.title || "Untitled request")}</div>
+        <div class="request-title-text">${escHtml(req.title || "Untitled request")}</div>
         ${unpaidBadge ? `<div class="request-title-meta">${unpaidBadge}</div>` : ""}
       </td>
       <td>${escHtml(req.category || "general")}</td>
@@ -4408,7 +4419,6 @@ function renderClientRequestsAdmin(requests) {
       <td>${ownerCell}</td>
       <td>${statusPill}</td>
       <td><span class="date-text">${updatedDate}</span></td>
-      <td><button class="card-btn" onclick="openRequestDetail('${req.id}')">Manage</button></td>
     `;
     body.appendChild(tr);
   });

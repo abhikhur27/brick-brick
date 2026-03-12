@@ -1894,6 +1894,32 @@ table.tasks tr:hover td { background: var(--surface); }
   flex-wrap: wrap;
 }
 
+table.tasks.requests-table {
+  table-layout: fixed;
+}
+
+table.tasks.requests-table th:nth-child(1),
+table.tasks.requests-table td:nth-child(1) { width: 170px; }
+table.tasks.requests-table th:nth-child(3),
+table.tasks.requests-table td:nth-child(3) { width: 150px; }
+table.tasks.requests-table th:nth-child(4),
+table.tasks.requests-table td:nth-child(4) { width: 110px; }
+table.tasks.requests-table th:nth-child(5),
+table.tasks.requests-table td:nth-child(5) { width: 170px; }
+table.tasks.requests-table th:nth-child(6),
+table.tasks.requests-table td:nth-child(6) { width: 130px; }
+table.tasks.requests-table th:nth-child(7),
+table.tasks.requests-table td:nth-child(7) { width: 96px; }
+
+.request-row {
+  cursor: pointer;
+}
+
+.request-row:focus-visible {
+  outline: 1px solid var(--silver-dim);
+  outline-offset: -1px;
+}
+
 .client-flow-board {
   gap: 10px;
 }
@@ -2021,6 +2047,10 @@ tr.request-row-archived td {
   opacity: 0.58;
 }
 
+.request-row:hover td {
+  background: var(--surface2);
+}
+
 .request-helper {
   margin-top: 6px;
   font-family: 'DM Mono', monospace;
@@ -2134,6 +2164,14 @@ tr.request-row-archived td {
 .request-title-cell {
   display: grid;
   gap: 6px;
+  min-width: 0;
+}
+
+.request-title-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .request-title-meta {
