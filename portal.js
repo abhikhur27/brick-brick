@@ -3082,8 +3082,18 @@ window.closeLeadDetail = function () {
   editingLeadId = null;
 };
 
-document.getElementById("leadDetailOverlay")?.addEventListener("click", function (e) {
-  if (e.target === this) window.closeLeadDetail();
+const leadDetailOverlayEl = document.getElementById("leadDetailOverlay");
+let leadDetailBackdropPointerDown = false;
+leadDetailOverlayEl?.addEventListener("pointerdown", function (e) {
+  leadDetailBackdropPointerDown = e.target === this;
+});
+leadDetailOverlayEl?.addEventListener("pointercancel", () => {
+  leadDetailBackdropPointerDown = false;
+});
+leadDetailOverlayEl?.addEventListener("click", function (e) {
+  const shouldClose = e.target === this && leadDetailBackdropPointerDown;
+  leadDetailBackdropPointerDown = false;
+  if (shouldClose) window.closeLeadDetail();
 });
 
 document.getElementById("leadMergeOverlay")?.addEventListener("click", function (e) {
