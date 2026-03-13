@@ -30,6 +30,7 @@ const CLIENT_FLOW_COLS = [
   { key: "building",  label: "In Build" },
   { key: "delivered", label: "Delivered" },
 ];
+const PIPELINE_STAGE_SORT_ORDER = { leads: 0, contacted: 1, proposal: 2, closed: 3 };
 
 const LEAD_SERVICE_OPTIONS = [
   { value: "AI Workflow", tagClass: "tag-ai" },
@@ -113,6 +114,10 @@ const LEAD_RESEARCH_BLOCKED_HEADERS = [
 // ─── TASK SORT STATE ─────────────────────────────────────────────────────────
 let taskSortField = "due";     // "due" | "createdAt" | "priority" | "owner" | "done"
 let taskSortAsc   = true;
+let myWorkTaskSortField = "due"; // "due" | "createdAt" | "priority" | "owner" | "done"
+let myWorkTaskSortAsc = true;
+let myWorkLeadSortField = "due"; // "due" | "createdAt" | "priority" | "owner" | "status"
+let myWorkLeadSortAsc = true;
 
 // ─── LISTENER HANDLES ────────────────────────────────────────────────────────
 let unsubPipeline   = null;
@@ -390,6 +395,10 @@ onAuthStateChanged(auth, async (user) => {
     showArchivedRequests = false;
     showArchivedMyWorkRequests = false;
     showCompletedMyTasks = false;
+    myWorkTaskSortField = "due";
+    myWorkTaskSortAsc = true;
+    myWorkLeadSortField = "due";
+    myWorkLeadSortAsc = true;
     showAllLeads = false;
     teamTimelineExpanded = true;
     clientsSearchTerm = "";
@@ -2411,6 +2420,55 @@ function renderPipelineRadar(cards, visibleCards) {
   `;
 }
 
+function myWorkLeadPriorityOrder(card) {
+  const score = leadFollowUpPriorityScore(card);
+  if (score >= 70) return 0;
+  if (score >= 40) return 1;
+  return 2;
+}
+
+function sortedMyWorkLeads(leads) {
+  const arr = [...(Array.isArray(leads) ? leads : [])];
+  arr.sort((a, b) => {
+    let va;
+    let vb;
+    switch (myWorkLeadSortField) {
+      case "due":
+        va = leadNextFollowUpMs(a) || Number.MAX_SAFE_INTEGER;
+        vb = leadNextFollowUpMs(b) || Number.MAX_SAFE_INTEGER;
+        break;
+      case "createdAt":
+        va = requestTimelineMs(a?.createdAt);
+        vb = requestTimelineMs(b?.createdAt);
+        break;
+      case "priority":
+        va = myWorkLeadPriorityOrder(a);
+        vb = myWorkLeadPriorityOrder(b);
+        break;
+      case "owner":
+        va = leadOwnerLabel(a).toLowerCase();
+        vb = leadOwnerLabel(b).toLowerCase();
+        break;
+      case "status":
+        va = PIPELINE_STAGE_SORT_ORDER[String(a?.status || "leads")] ?? 9;
+        vb = PIPELINE_STAGE_SORT_ORDER[String(b?.status || "leads")] ?? 9;
+        break;
+      default:
+        va = requestTimelineMs(a?.updatedAt) || requestTimelineMs(a?.createdAt);
+        vb = requestTimelineMs(b?.updatedAt) || requestTimelineMs(b?.createdAt);
+        break;
+    }
+
+    if (va < vb) return myWorkLeadSortAsc ? -1 : 1;
+    if (va > vb) return myWorkLeadSortAsc ? 1 : -1;
+
+    const aUpdated = requestTimelineMs(a?.updatedAt) || requestTimelineMs(a?.createdAt);
+    const bUpdated = requestTimelineMs(b?.updatedAt) || requestTimelineMs(b?.createdAt);
+    return bUpdated - aUpdated;
+  });
+  return arr;
+}
+
 function renderMyWorkDashboard() {
   const summaryEl = document.getElementById("myWorkSummary");
   const callsEl = document.getElementById("myCallsList");
@@ -2429,16 +2487,11 @@ function renderMyWorkDashboard() {
     return;
   }
 
-  const myLeads = currentPipeline
-    .filter((card) => {
-      const ownerUid = String(card.ownerUid || "");
-      return ownerUid === currentUid || isTeamAssignmentUid(ownerUid);
-    })
-    .sort((a, b) => {
-      const ams = requestTimelineMs(a.updatedAt) || requestTimelineMs(a.createdAt);
-      const bms = requestTimelineMs(b.updatedAt) || requestTimelineMs(b.createdAt);
-      return bms - ams;
-    });
+  const myLeadsBase = currentPipeline.filter((card) => {
+    const ownerUid = String(card.ownerUid || "");
+    return ownerUid === currentUid || isTeamAssignmentUid(ownerUid);
+  });
+  const myLeads = sortedMyWorkLeads(myLeadsBase);
 
   const myRequests = currentClientRequests
     .filter((req) => {
@@ -2457,23 +2510,16 @@ function renderMyWorkDashboard() {
   const meLabel = String(me?.name || auth.currentUser?.displayName || "").trim().toLowerCase();
   const meEmail = normalizeEmail(me?.email || auth.currentUser?.email || "");
 
-  const allMyTasks = currentTasks
-    .filter((task) => {
+  const allMyTasks = sortedTasks(
+    currentTasks.filter((task) => {
       const normalized = normalizeTaskOwnerFields(task);
       if (isTeamAssignmentUid(normalized.ownerUid)) return true;
       if (normalized.ownerUid) return normalized.ownerUid === currentUid;
       const ownerLower = String(normalized.ownerName || normalized.owner || "").trim().toLowerCase();
       return ownerLower && (ownerLower === meLabel || ownerLower === meEmail);
-    })
-    .sort((a, b) => {
-      if (Boolean(a.done) !== Boolean(b.done)) return a.done ? 1 : -1;
-      const adue = a.due || "9999-99-99";
-      const bdue = b.due || "9999-99-99";
-      if (adue !== bdue) return adue.localeCompare(bdue);
-      const ams = requestTimelineMs(a.updatedAt) || requestTimelineMs(a.createdAt);
-      const bms = requestTimelineMs(b.updatedAt) || requestTimelineMs(b.createdAt);
-      return bms - ams;
-    });
+    }),
+    { field: myWorkTaskSortField, asc: myWorkTaskSortAsc }
+  );
   const openMyTasks = allMyTasks.filter((task) => !task.done);
   const completedMyTasks = allMyTasks.filter((task) => task.done);
   const visibleMyTasks = showCompletedMyTasks ? allMyTasks : openMyTasks;
@@ -2527,10 +2573,22 @@ function renderMyWorkDashboard() {
     }).join("");
   }
 
+  const leadsTools = `
+    <div class="my-work-inline-tools my-work-sort-tools">
+      <span class="sort-label">Sort</span>
+      <button class="sort-pill${myWorkLeadSortField === "due" ? " active" : ""}" type="button" onclick="setMyWorkLeadSort('due')">Due Date</button>
+      <button class="sort-pill${myWorkLeadSortField === "createdAt" ? " active" : ""}" type="button" onclick="setMyWorkLeadSort('createdAt')">Date Added</button>
+      <button class="sort-pill${myWorkLeadSortField === "priority" ? " active" : ""}" type="button" onclick="setMyWorkLeadSort('priority')">Priority</button>
+      <button class="sort-pill${myWorkLeadSortField === "owner" ? " active" : ""}" type="button" onclick="setMyWorkLeadSort('owner')">Owner</button>
+      <button class="sort-pill${myWorkLeadSortField === "status" ? " active" : ""}" type="button" onclick="setMyWorkLeadSort('status')">Status</button>
+      <button class="sort-dir" type="button" onclick="toggleMyWorkLeadSortDir()" title="Toggle ascending / descending">${myWorkLeadSortAsc ? "↑" : "↓"}</button>
+    </div>
+  `;
+
   if (!myLeads.length) {
-    leadsEl.innerHTML = `<div class="empty-state" style="padding:14px;font-size:10px">No assigned leads yet.</div>`;
+    leadsEl.innerHTML = `${leadsTools}<div class="empty-state" style="padding:14px;font-size:10px">No assigned leads yet.</div>`;
   } else {
-    leadsEl.innerHTML = myLeads.map((card) => {
+    leadsEl.innerHTML = leadsTools + myLeads.map((card) => {
       const statusLabel = pipelineStatusLabel(card.status);
       const tagClass = leadServiceTagClass(card.service);
       const updatedMs = requestTimelineMs(card.updatedAt) || requestTimelineMs(card.createdAt);
@@ -2596,7 +2654,18 @@ function renderMyWorkDashboard() {
   const completedToggleLabel = showCompletedMyTasks
     ? "Open Only"
     : `Include Completed (${completedMyTasks.length})`;
-  const tasksTools = `
+  const tasksSortTools = `
+    <div class="my-work-inline-tools my-work-sort-tools">
+      <span class="sort-label">Sort</span>
+      <button class="sort-pill${myWorkTaskSortField === "due" ? " active" : ""}" type="button" onclick="setMyWorkTaskSort('due')">Due Date</button>
+      <button class="sort-pill${myWorkTaskSortField === "createdAt" ? " active" : ""}" type="button" onclick="setMyWorkTaskSort('createdAt')">Date Added</button>
+      <button class="sort-pill${myWorkTaskSortField === "priority" ? " active" : ""}" type="button" onclick="setMyWorkTaskSort('priority')">Priority</button>
+      <button class="sort-pill${myWorkTaskSortField === "owner" ? " active" : ""}" type="button" onclick="setMyWorkTaskSort('owner')">Owner</button>
+      <button class="sort-pill${myWorkTaskSortField === "done" ? " active" : ""}" type="button" onclick="setMyWorkTaskSort('done')">Status</button>
+      <button class="sort-dir" type="button" onclick="toggleMyWorkTaskSortDir()" title="Toggle ascending / descending">${myWorkTaskSortAsc ? "↑" : "↓"}</button>
+    </div>
+  `;
+  const tasksStateTools = `
     <div class="my-work-inline-tools">
       <span class="date-text">${showCompletedMyTasks ? "Showing open + completed assignments" : "Showing open assignments only"}</span>
       <button class="sort-pill${showCompletedMyTasks ? " active" : ""}" type="button" onclick="toggleMyWorkCompletedTasks()" ${(completedMyTasks.length || showCompletedMyTasks) ? "" : "disabled"}>
@@ -2604,6 +2673,7 @@ function renderMyWorkDashboard() {
       </button>
     </div>
   `;
+  const tasksTools = `${tasksSortTools}${tasksStateTools}`;
 
   if (!allMyTasks.length) {
     tasksEl.innerHTML = `${tasksTools}<div class="empty-state" style="padding:14px;font-size:10px">No assigned tasks yet.</div>`;
@@ -2643,6 +2713,40 @@ function renderMyWorkDashboard() {
     }).join("");
   }
 }
+
+window.setMyWorkLeadSort = function (field) {
+  const allowed = new Set(["due", "createdAt", "priority", "owner", "status"]);
+  const nextField = allowed.has(String(field || "")) ? String(field) : "due";
+  if (myWorkLeadSortField === nextField) {
+    myWorkLeadSortAsc = !myWorkLeadSortAsc;
+  } else {
+    myWorkLeadSortField = nextField;
+    myWorkLeadSortAsc = true;
+  }
+  renderMyWorkDashboard();
+};
+
+window.toggleMyWorkLeadSortDir = function () {
+  myWorkLeadSortAsc = !myWorkLeadSortAsc;
+  renderMyWorkDashboard();
+};
+
+window.setMyWorkTaskSort = function (field) {
+  const allowed = new Set(["due", "createdAt", "priority", "owner", "done"]);
+  const nextField = allowed.has(String(field || "")) ? String(field) : "due";
+  if (myWorkTaskSortField === nextField) {
+    myWorkTaskSortAsc = !myWorkTaskSortAsc;
+  } else {
+    myWorkTaskSortField = nextField;
+    myWorkTaskSortAsc = true;
+  }
+  renderMyWorkDashboard();
+};
+
+window.toggleMyWorkTaskSortDir = function () {
+  myWorkTaskSortAsc = !myWorkTaskSortAsc;
+  renderMyWorkDashboard();
+};
 
 window.toggleMyWorkArchivedRequests = function () {
   showArchivedMyWorkRequests = !showArchivedMyWorkRequests;
@@ -3031,11 +3135,13 @@ function isTaskStale(task) {
   return updatedMs < staleCutoffMs;
 }
 
-function sortedTasks(tasks) {
+function sortedTasks(tasks, options = {}) {
+  const sortField = String(options.field || taskSortField || "due");
+  const sortAsc = options.asc == null ? taskSortAsc : Boolean(options.asc);
   const arr = [...tasks];
   arr.sort((a, b) => {
     let va, vb;
-    switch (taskSortField) {
+    switch (sortField) {
       case "due":
         va = a.due || "9999-99-99";
         vb = b.due || "9999-99-99";
@@ -3059,8 +3165,8 @@ function sortedTasks(tasks) {
       default:
         va = vb = 0;
     }
-    if (va < vb) return taskSortAsc ? -1 : 1;
-    if (va > vb) return taskSortAsc ?  1 : -1;
+    if (va < vb) return sortAsc ? -1 : 1;
+    if (va > vb) return sortAsc ?  1 : -1;
     return 0;
   });
   return arr;
@@ -6064,7 +6170,7 @@ function renderDecisions(decisions) {
               editing
                 ? `<div class="decision-item-fields">
                      <input class="form-input decision-item-input" id="dec_text_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" value="${escHtmlAttr(itemText)}" placeholder="Decision text">
-                     <input class="form-input decision-item-owner-input" id="dec_owner_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" value="${escHtmlAttr(itemOwner)}" placeholder="Subtitle (optional)">
+                     <textarea class="form-input form-textarea decision-item-owner-input" id="dec_owner_${escHtmlAttr(entry.id)}_${escHtmlAttr(item.id)}" rows="3" placeholder="Subtitle (optional)">${escHtml(itemOwner)}</textarea>
                    </div>`
                 : `<div class="decision-text">${escHtml(itemText || "Untitled decision")}</div>
                    <div class="decision-subtitle">${escHtml(subtitle)}</div>`
@@ -6507,7 +6613,7 @@ function buildDecisionRow(n) {
         <input class="form-input decision-row-text" placeholder="What was decided?">
       </div>
       <div class="form-group">
-        <input class="form-input decision-row-owner" placeholder="Subtitle (optional)">
+        <textarea class="form-input form-textarea decision-row-owner" rows="3" placeholder="Subtitle (optional)"></textarea>
       </div>
     </div>
   `;
