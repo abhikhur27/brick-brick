@@ -318,6 +318,10 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    match /outbound_email_queue/{docId} {
+      allow read, write: if isAdmin();
+    }
+
     // CONTACT FORM SUBMISSIONS
     // Public visitors can create a submission.
     // Team admins can read/update/delete.

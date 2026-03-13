@@ -94,26 +94,27 @@
 - `login_provisioning`
 - `contact_submissions`
 - `lead_research_imports`
+- `outbound_email_queue`
 
 ## Client Request Update Emails (Spark-safe)
-- Team portal updates on `client_requests` now trigger a webhook payload for transactional client emails.
-- Default webhook: the same Make webhook used for inbound form alerts.
-- Optional override per browser session:
-  - `localStorage.setItem("bb_client_request_update_webhook_url", "https://hook.us2.make.com/your-request-update-hook")`
+- Team portal updates on `client_requests` now write queued email jobs to `outbound_email_queue`.
+- This avoids webhook token usage and stays Spark-safe (Firestore + Auth only, no Cloud Functions).
 
-### Payload Highlights
+### Queue Document Highlights
 - `eventType: "client_request_update"`
 - `email` / `toEmail`
 - `subject`
 - `html` (styled email body)
 - `text` (plain-text fallback)
 - Request metadata (`requestId`, `clientId`, `status`, `priority`, `category`)
+- Queue metadata (`deliveryStatus`, `template`, `sourceDocPath`, `createdAt`)
 
-### Make/Zap Flow
-1. Trigger on custom webhook.
-2. Filter route: `eventType == client_request_update`.
+### Worker Flow (Make/Zap/n8n or your own script)
+1. Watch Firestore collection: `outbound_email_queue`.
+2. Filter route: `eventType == client_request_update` and `deliveryStatus == queued`.
 3. Send email using:
    - To: `toEmail`
    - Subject: `subject`
    - HTML Body: `html`
    - Text Body: `text`
+4. Mark processed queue doc as sent/failed.

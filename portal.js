@@ -44,8 +44,7 @@ const TEAM_ASSIGNMENT_UID = "__team__";
 const OTHER_ASSIGNMENT_UID = "__other__";
 const TEAM_RESET_RETURN_URL = new URL("/reset-password.html?portal=team", window.location.origin).toString();
 const CLIENT_RESET_RETURN_URL = new URL("/reset-password.html?portal=client", window.location.origin).toString();
-const DEFAULT_CLIENT_REQUEST_UPDATE_WEBHOOK_URL = "https://hook.us2.make.com/6r8c9mwbh7yfej1erffgpidbwsfy8mmw";
-const CLIENT_REQUEST_UPDATE_WEBHOOK_STORAGE_KEY = "bb_client_request_update_webhook_url";
+const OUTBOUND_EMAIL_QUEUE_COLLECTION = "outbound_email_queue";
 const CLIENT_PORTAL_URL = new URL("/client.html", window.location.origin).toString();
 
 // ─── STATE CACHES (updated by real-time listeners) ───────────────────────────
@@ -4363,16 +4362,6 @@ function requestCategoryLabel(category) {
     .replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
-function requestUpdateWebhookUrl() {
-  try {
-    const override = String(window.localStorage.getItem(CLIENT_REQUEST_UPDATE_WEBHOOK_STORAGE_KEY) || "").trim();
-    if (override) return override;
-  } catch (err) {
-    console.warn("requestUpdateWebhookUrl localStorage read failed:", err);
-  }
-  return DEFAULT_CLIENT_REQUEST_UPDATE_WEBHOOK_URL;
-}
-
 function buildClientRequestUpdateEmailPayload(req, options = {}) {
   const status = String(options.status || req.status || "submitted");
   const priority = String(options.priority || req.priority || "normal");
@@ -4516,27 +4505,27 @@ async function sendClientRequestUpdateEmail(req, options = {}) {
   const toEmail = normalizeEmail(req?.clientEmail || "");
   if (!toEmail) return { sent: false, reason: "missing-client-email" };
 
-  const webhookUrl = String(requestUpdateWebhookUrl() || "").trim();
-  if (!webhookUrl) return { sent: false, reason: "missing-webhook-url" };
-
   const payload = buildClientRequestUpdateEmailPayload(
     { ...req, clientEmail: toEmail },
     options
   );
 
   try {
-    const response = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+    await addDoc(collection(db, OUTBOUND_EMAIL_QUEUE_COLLECTION), {
+      ...payload,
+      channel: "email",
+      template: "client_request_update_v1",
+      deliveryStatus: "queued",
+      sourceDocPath: payload.requestId ? `client_requests/${payload.requestId}` : "",
+      queuedByUid: auth.currentUser?.uid || "",
+      queuedByEmail: auth.currentUser?.email || "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
-    if (!response.ok) {
-      throw new Error(`Webhook request failed with status ${response.status}`);
-    }
-    return { sent: true, reason: "ok" };
+    return { sent: true, reason: "queued-firestore" };
   } catch (err) {
     console.warn("sendClientRequestUpdateEmail failed:", err);
-    return { sent: false, reason: String(err?.message || "webhook-request-failed") };
+    return { sent: false, reason: String(err?.message || "queue-write-failed") };
   }
 }
 
