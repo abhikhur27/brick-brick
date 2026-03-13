@@ -69,6 +69,10 @@
           <div class="metric-label">Payment Status</div>
           <div class="metric-value" id="cpPaymentStatus">-</div>
         </div>
+        <div class="metric">
+          <div class="metric-label">Contact Phone</div>
+          <div class="metric-value" id="cpPhone">-</div>
+        </div>
       </div>
     </section>
 
@@ -106,6 +110,18 @@
             Description
             <textarea id="crDescription" rows="5" maxlength="4000" placeholder="Describe what you need changed or fixed." required></textarea>
           </label>
+          <div class="request-attachments-block">
+            <div class="request-attachments-head">
+              <div class="metric-label">Attachments (Optional)</div>
+              <button class="btn btn-ghost" id="crAttachBrowseBtn" type="button">Add Files</button>
+            </div>
+            <div class="request-attachments-dropzone" id="crAttachmentDropzone" tabindex="0" role="button" aria-label="Attach files">
+              Drag files here or paste screenshots/files from clipboard.
+            </div>
+            <input type="file" id="crAttachmentsInput" multiple hidden>
+            <div class="request-attachments-list" id="crAttachmentsList"></div>
+            <div class="request-attachments-help">Up to 6 files, 10MB each.</div>
+          </div>
           <button class="btn btn-primary full" id="crSubmitBtn" type="submit">Submit request</button>
           <p class="form-status" id="crStatus"></p>
         </form>

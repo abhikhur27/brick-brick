@@ -5,11 +5,19 @@ import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendP
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc,
          onSnapshot, serverTimestamp, query, orderBy, arrayUnion, where }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import {
+  getStorage,
+  ref as storageRef,
+  listAll,
+  getDownloadURL,
+  getMetadata,
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 import { firebaseConfig }          from "./firebase-config.js";
 
 const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
+const storage = getStorage(app);
 
 // ─── ANTI-FLASH GUARD ────────────────────────────────────────────────────────
 // Body starts invisible; revealed after auth state resolves so there's never
@@ -141,10 +149,12 @@ let mergePrimaryLeadId = null;
 let selectedClientId = null;
 let currentUserRole = null;
 let draggingPipelineCardId = null;
+let draggingClientFlowCardId = null;
 let suppressCardClickUntil = 0;
 let managedUsersFilter = "client";
 let editingManagedRecordKey = null;
 let editingDecisionItems = new Set();
+const requestAttachmentPanelState = new Map();
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
 window.doLogin = async function () {
@@ -770,6 +780,8 @@ function stopRealtimeListeners() {
   unsubClientRequests = null;
   unsubClientFlow = null;
   unsubLeadResearchImports = null;
+  draggingClientFlowCardId = null;
+  requestAttachmentPanelState.clear();
 }
 
 function startManagedUserListeners() {
@@ -3439,6 +3451,7 @@ function clientMatchesSearch(client) {
     client.companyName,
     client.contactName,
     client.email,
+    client.phone,
     client.planName,
     client.notes,
   ]
@@ -3550,6 +3563,10 @@ function renderClientDetailPane() {
       <div class="form-group">
         <label class="form-label">Contact Email</label>
         <input class="form-input" id="cd_email" value="${escHtmlAttr(client.email || "")}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contact Phone</label>
+        <input class="form-input" id="cd_phone" value="${escHtmlAttr(client.phone || "")}" placeholder="+1 555 123 4567">
       </div>
       <div class="form-group">
         <label class="form-label">Client Auth UID (Optional Fallback)</label>
@@ -3695,6 +3712,7 @@ window.saveClientDetail = async function () {
       contactName: document.getElementById("cd_contactName").value.trim(),
       email,
       emailLower: email,
+      phone: String(document.getElementById("cd_phone").value || "").trim(),
       authUid: resolvedAuthUid,
       planName: document.getElementById("cd_planName").value.trim(),
       status: document.getElementById("cd_status").value,
@@ -4389,7 +4407,22 @@ function buildRequestTimeline(req, includeInternal = true) {
   }
 
   timeline.sort((a, b) => b.createdAtMs - a.createdAtMs);
-  return timeline;
+  const deduped = [];
+  const seen = new Set();
+  timeline.forEach((entry) => {
+    const minuteBucket = Math.floor(Number(entry.createdAtMs || 0) / 60000);
+    const signature = [
+      String(entry.kind || ""),
+      String(entry.status || ""),
+      String(entry.text || "").trim(),
+      String(entry.visibility || ""),
+      String(minuteBucket),
+    ].join("|");
+    if (seen.has(signature)) return;
+    seen.add(signature);
+    deduped.push(entry);
+  });
+  return deduped;
 }
 
 function renderRequestTimelineHtml(req, includeInternal = true) {
@@ -4452,6 +4485,95 @@ function makeRequestTimelineEntry({ kind = "note", status = "", text = "", visib
     actor: auth.currentUser?.email || "Team",
     createdAtMs: Date.now(),
   };
+}
+
+function requestAttachmentPrefix(clientId, requestId) {
+  return `client_request_uploads/${String(clientId || "").trim()}/${String(requestId || "").trim()}`;
+}
+
+function formatAttachmentBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function requestAttachmentPanelHtml(requestId) {
+  const state = requestAttachmentPanelState.get(requestId);
+  if (!state || state.loading) {
+    return `<div class="empty-state" style="padding:14px;font-size:10px">Loading attachments...</div>`;
+  }
+  if (state.error) {
+    return `<div class="empty-state" style="padding:14px;font-size:10px">${escHtml(state.error)}</div>`;
+  }
+  if (!state.items?.length) {
+    return `<div class="empty-state" style="padding:14px;font-size:10px">No uploaded files for this request yet.</div>`;
+  }
+  return `
+    <div class="request-attachment-list">
+      ${state.items.map((item) => `
+        <a class="request-attachment-row" href="${escHtmlAttr(item.url)}" target="_blank" rel="noopener" download="${escHtmlAttr(item.name)}">
+          <div>
+            <div class="request-attachment-name">${escHtml(item.name)}</div>
+            <div class="request-attachment-meta">${escHtml(item.contentType || "File")} ${item.size ? `| ${escHtml(formatAttachmentBytes(item.size))}` : ""}</div>
+          </div>
+          <span class="timeline-chip">Download</span>
+        </a>
+      `).join("")}
+    </div>
+  `;
+}
+
+async function listRequestAttachmentItems(clientId, requestId) {
+  if (!clientId || !requestId) return [];
+  const listing = await listAll(storageRef(storage, requestAttachmentPrefix(clientId, requestId)));
+  const items = await Promise.all(
+    listing.items.map(async (itemRef) => {
+      let metadata = null;
+      try {
+        metadata = await getMetadata(itemRef);
+      } catch (err) {
+        console.warn("listRequestAttachmentItems metadata:", err);
+      }
+      const name = String(metadata?.customMetadata?.originalName || itemRef.name || "Attachment");
+      const url = await getDownloadURL(itemRef);
+      return {
+        name,
+        url,
+        size: Number(metadata?.size || 0),
+        contentType: String(metadata?.contentType || ""),
+      };
+    })
+  );
+  items.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  return items;
+}
+
+async function refreshRequestAttachmentPanel(req) {
+  const requestId = String(req?.id || "");
+  const clientId = String(req?.clientId || "");
+  if (!requestId || !clientId) return;
+
+  requestAttachmentPanelState.set(requestId, { loading: true, items: [], error: "" });
+  const panel = document.getElementById("requestAttachmentPanel");
+  if (panel) panel.innerHTML = requestAttachmentPanelHtml(requestId);
+  try {
+    const items = await listRequestAttachmentItems(clientId, requestId);
+    requestAttachmentPanelState.set(requestId, { loading: false, items, error: "" });
+  } catch (err) {
+    console.error("refreshRequestAttachmentPanel:", err);
+    requestAttachmentPanelState.set(requestId, {
+      loading: false,
+      items: [],
+      error: "Could not load request files right now.",
+    });
+  }
+
+  if (editingRequestId === requestId) {
+    const activePanel = document.getElementById("requestAttachmentPanel");
+    if (activePanel) activePanel.innerHTML = requestAttachmentPanelHtml(requestId);
+  }
 }
 
 function requestPriorityLabel(priority) {
@@ -4746,6 +4868,23 @@ function renderClientFlowBoard(cards) {
     board.appendChild(columnEl);
 
     const container = columnEl.querySelector(`#flow-col-${key}`);
+    container.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      container.classList.add("is-drop-target");
+    });
+    container.addEventListener("dragleave", () => {
+      container.classList.remove("is-drop-target");
+    });
+    container.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      clearClientFlowDropTargets();
+      const cardId = event.dataTransfer?.getData("text/client-flow-card") || draggingClientFlowCardId;
+      if (!cardId) return;
+      const card = cards.find((entry) => entry.id === cardId);
+      if (!card || String(card.status || "queued") === key) return;
+      await window.moveClientFlowCard(cardId, key);
+    });
+
     columnCards.forEach((card) => {
       const linkedRequestId = String(card.requestId || "");
       const moveButtons = CLIENT_FLOW_COLS
@@ -4755,12 +4894,31 @@ function renderClientFlowBoard(cards) {
 
       const cardEl = document.createElement("div");
       cardEl.className = "card client-flow-card";
+      cardEl.draggable = true;
       cardEl.tabIndex = linkedRequestId ? 0 : -1;
+      cardEl.addEventListener("dragstart", (event) => {
+        draggingClientFlowCardId = card.id;
+        cardEl.classList.add("dragging");
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/client-flow-card", card.id);
+          event.dataTransfer.setData("text/plain", card.id);
+        }
+      });
+      cardEl.addEventListener("dragend", () => {
+        draggingClientFlowCardId = null;
+        cardEl.classList.remove("dragging");
+        clearClientFlowDropTargets();
+        suppressCardClickUntil = Date.now() + 250;
+      });
       if (linkedRequestId) {
         cardEl.classList.add("is-clickable");
         cardEl.setAttribute("role", "button");
         cardEl.setAttribute("aria-label", `Open request ${String(card.requestTitle || card.title || "request")}`);
-        cardEl.addEventListener("click", () => openRequestDetail(linkedRequestId));
+        cardEl.addEventListener("click", () => {
+          if (Date.now() < suppressCardClickUntil) return;
+          openRequestDetail(linkedRequestId);
+        });
         cardEl.addEventListener("keydown", (event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
@@ -4780,6 +4938,12 @@ function renderClientFlowBoard(cards) {
       `;
       container.appendChild(cardEl);
     });
+  });
+}
+
+function clearClientFlowDropTargets() {
+  document.querySelectorAll("#clientForgeBoard .kanban-dropzone.is-drop-target").forEach((el) => {
+    el.classList.remove("is-drop-target");
   });
 }
 
@@ -5788,6 +5952,10 @@ window.openRequestDetail = function (id) {
         <label class="form-label">Description</label>
         <textarea class="form-input form-textarea" id="rd_description" rows="4" readonly>${escHtml(req.description || "")}</textarea>
       </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Request Files</label>
+        <div id="requestAttachmentPanel">${requestAttachmentPanelHtml(req.id)}</div>
+      </div>
       <div class="form-group">
         <label class="form-label">Priority</label>
         <select class="form-select" id="rd_priority">
@@ -5841,6 +6009,7 @@ window.openRequestDetail = function (id) {
   }
 
   document.getElementById("requestDetailOverlay").classList.add("open");
+  void refreshRequestAttachmentPanel(req);
 };
 
 window.closeRequestDetail = function () {
@@ -5916,7 +6085,7 @@ window.saveRequestDetail = async function () {
     );
   }
 
-  if (nextStatus !== String(req.status || "submitted")) {
+  if (nextStatus !== String(req.status || "submitted") && !clientUpdate) {
     timelineEntries.push(
       makeRequestTimelineEntry({
         kind: "status",
@@ -6527,6 +6696,10 @@ function getModalForm(mode) {
         <input class="form-input" id="f_email" placeholder="contact@company.com">
       </div>
       <div class="form-group">
+        <label class="form-label">Contact Phone</label>
+        <input class="form-input" id="f_phone" placeholder="+1 555 123 4567">
+      </div>
+      <div class="form-group">
         <label class="form-label">Client Auth UID (Optional Fallback)</label>
         <input class="form-input" id="f_authUid" placeholder="Leave blank to auto-create and send reset link">
       </div>
@@ -6728,6 +6901,7 @@ window.saveModal = async function () {
 
       const authUid = document.getElementById("f_authUid").value.trim();
       const email = normalizeEmail(document.getElementById("f_email").value);
+      const phone = String(document.getElementById("f_phone").value || "").trim();
       const updatesPerMonth = Math.max(0, Number(document.getElementById("f_updatesPerMonth").value || 0));
       const updatesRemaining = Math.max(0, Number(document.getElementById("f_updatesRemaining").value || 0));
       const contactName = document.getElementById("f_contactName").value.trim();
@@ -6743,6 +6917,7 @@ window.saveModal = async function () {
         contactName,
         email,
         emailLower: email,
+        phone,
         authUid: resolvedAuthUid,
         planName: document.getElementById("f_planName").value.trim(),
         recurring: document.getElementById("f_recurring").value === "true",
@@ -6768,6 +6943,7 @@ window.saveModal = async function () {
         companyName,
         contactName,
         email,
+        phone,
         authUid: resolvedAuthUid,
         notes,
       });

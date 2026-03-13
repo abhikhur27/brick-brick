@@ -279,7 +279,7 @@ body::before {
   margin-top: 14px;
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
 .metric {
@@ -406,6 +406,100 @@ body::before {
 .request-form select:focus {
   outline: none;
   border-color: var(--silver-dim);
+}
+
+.request-attachments-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.request-attachments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.request-attachments-dropzone {
+  border: 1px dashed var(--border-light);
+  border-radius: 8px;
+  padding: 12px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--silver-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.request-attachments-dropzone:hover,
+.request-attachments-dropzone:focus-visible,
+.request-attachments-dropzone.is-active {
+  border-color: var(--silver-dim);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--silver);
+  outline: none;
+}
+
+.request-attachments-list {
+  display: grid;
+  gap: 6px;
+}
+
+.request-attachment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+  padding: 8px 10px;
+}
+
+.request-attachment-main {
+  min-width: 0;
+}
+
+.request-attachment-name {
+  color: var(--silver-bright);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.request-attachment-meta {
+  margin-top: 2px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--silver-dim);
+}
+
+.request-attachment-remove {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--silver-dim);
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.request-attachment-remove:hover {
+  color: var(--red-soft);
+  border-color: rgba(236, 112, 99, 0.35);
+}
+
+.request-attachments-help {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--silver-dim);
 }
 
 .form-status {
@@ -613,6 +707,35 @@ body::before {
 
 .client-detail-section {
   margin-top: 12px;
+}
+
+.client-attachments-list {
+  display: grid;
+  gap: 8px;
+}
+
+.client-attachment-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface2);
+  color: var(--silver-bright);
+  text-decoration: none;
+  padding: 10px;
+}
+
+.client-attachment-link:hover {
+  border-color: var(--silver-dim);
+}
+
+.client-attachment-meta {
+  margin-top: 3px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--silver-dim);
 }
 
 .timeline-toolbar {

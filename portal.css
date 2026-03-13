@@ -1947,13 +1947,17 @@ table.tasks.requests-table td:nth-child(7) { width: 96px; }
 }
 
 .client-flow-card {
-  cursor: default;
+  cursor: grab;
 }
 
 .client-flow-card:hover {
   transform: none;
   box-shadow: none;
   border-color: var(--border);
+}
+
+.client-flow-card.dragging {
+  cursor: grabbing;
 }
 
 .client-flow-card.is-clickable {
@@ -2090,6 +2094,41 @@ tr.request-row-archived td {
   font-size: 10px;
   color: var(--silver-dim);
   line-height: 1.4;
+}
+
+.request-attachment-list {
+  display: grid;
+  gap: 8px;
+}
+
+.request-attachment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255,255,255,0.02);
+  text-decoration: none;
+  color: var(--silver-bright);
+}
+
+.request-attachment-row:hover {
+  border-color: var(--silver-dim);
+}
+
+.request-attachment-name {
+  font-size: 12px;
+  color: var(--white);
+  line-height: 1.4;
+}
+
+.request-attachment-meta {
+  margin-top: 4px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--silver-dim);
 }
 
 .timeline-toolbar {

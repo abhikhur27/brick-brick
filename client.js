@@ -20,12 +20,23 @@ import {
   addDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  listAll,
+  getDownloadURL,
+  getMetadata,
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 const CLIENT_RESET_RETURN_URL = new URL("/reset-password.html?portal=client", window.location.origin).toString();
+const REQUEST_ATTACHMENT_MAX_FILES = 6;
+const REQUEST_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 let currentClientId = null;
 let currentClient = null;
@@ -34,6 +45,8 @@ let unsubRequests = null;
 let currentRequests = [];
 let activeRequestId = null;
 let clientTimelineExpanded = true;
+let pendingRequestAttachments = [];
+const requestAttachmentCache = new Map();
 
 document.body.style.visibility = "hidden";
 
@@ -50,6 +63,10 @@ const logoutBtn = document.getElementById("clientLogoutBtn");
 const requestForm = document.getElementById("clientRequestForm");
 const requestBtn = document.getElementById("crSubmitBtn");
 const requestStatus = document.getElementById("crStatus");
+const requestAttachmentInput = document.getElementById("crAttachmentsInput");
+const requestAttachmentBrowseBtn = document.getElementById("crAttachBrowseBtn");
+const requestAttachmentDropzone = document.getElementById("crAttachmentDropzone");
+const requestAttachmentList = document.getElementById("crAttachmentsList");
 const requestDetailOverlay = document.getElementById("clientRequestDetailOverlay");
 const requestDetailBody = document.getElementById("clientRequestDetailBody");
 const requestCloseBtn = document.getElementById("clientRequestCloseBtn");
@@ -111,6 +128,50 @@ logoutBtn?.addEventListener("click", async () => {
   await signOut(auth);
 });
 
+requestAttachmentBrowseBtn?.addEventListener("click", () => {
+  requestAttachmentInput?.click();
+});
+
+requestAttachmentInput?.addEventListener("change", (event) => {
+  const files = Array.from(event.target?.files || []);
+  addPendingRequestAttachments(files, "Selected");
+  if (requestAttachmentInput) requestAttachmentInput.value = "";
+});
+
+requestAttachmentDropzone?.addEventListener("click", () => {
+  requestAttachmentInput?.click();
+});
+
+requestAttachmentDropzone?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    requestAttachmentInput?.click();
+  }
+});
+
+requestAttachmentDropzone?.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  requestAttachmentDropzone.classList.add("is-active");
+});
+
+requestAttachmentDropzone?.addEventListener("dragleave", () => {
+  requestAttachmentDropzone.classList.remove("is-active");
+});
+
+requestAttachmentDropzone?.addEventListener("drop", (event) => {
+  event.preventDefault();
+  requestAttachmentDropzone.classList.remove("is-active");
+  const files = Array.from(event.dataTransfer?.files || []);
+  addPendingRequestAttachments(files, "Added");
+});
+
+requestForm?.addEventListener("paste", (event) => {
+  const files = filesFromClipboardEvent(event);
+  if (!files.length) return;
+  event.preventDefault();
+  addPendingRequestAttachments(files, "Pasted");
+});
+
 requestForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearRequestStatus();
@@ -136,7 +197,7 @@ requestForm?.addEventListener("submit", async (event) => {
   requestBtn.textContent = "Submitting...";
 
   try {
-    await addDoc(collection(db, "client_requests"), {
+    const requestRef = await addDoc(collection(db, "client_requests"), {
       clientId: currentClientId,
       clientName: currentClient.companyName || currentClient.contactName || "Client",
       clientEmail: currentClient.email || auth.currentUser?.email || "",
@@ -152,13 +213,36 @@ requestForm?.addEventListener("submit", async (event) => {
       source: "client-dashboard",
     });
 
+    let uploadedCount = 0;
+    let failedCount = 0;
+    if (pendingRequestAttachments.length) {
+      const uploadResult = await uploadRequestAttachmentsForClient({
+        clientId: currentClientId,
+        requestId: requestRef.id,
+        files: pendingRequestAttachments,
+      });
+      uploadedCount = uploadResult.uploaded;
+      failedCount = uploadResult.failed;
+    }
+
     requestForm.reset();
     const priorityEl = document.getElementById("crPriority");
     if (priorityEl) priorityEl.value = "normal";
+    clearPendingRequestAttachments();
+
+    const attachmentNote = uploadedCount
+      ? `${uploadedCount} file${uploadedCount === 1 ? "" : "s"} attached.`
+      : "";
+    const attachmentWarn = failedCount
+      ? ` ${failedCount} file${failedCount === 1 ? "" : "s"} failed to upload.`
+      : "";
     if (unpaidAtSubmission) {
-      setRequestStatus("Request submitted and marked unpaid for billing follow-up. We will still review it shortly.", false);
+      setRequestStatus(
+        `Request submitted and marked unpaid for billing follow-up. We will still review it shortly. ${attachmentNote}${attachmentWarn}`.trim(),
+        false
+      );
     } else {
-      setRequestStatus("Request submitted. We will review it shortly.", false);
+      setRequestStatus(`Request submitted. We will review it shortly. ${attachmentNote}${attachmentWarn}`.trim(), false);
     }
   } catch (err) {
     console.error("client request submit:", err);
@@ -414,6 +498,8 @@ function stopClientListeners() {
   unsubClientDoc = null;
   unsubRequests = null;
   currentRequests = [];
+  requestAttachmentCache.clear();
+  clearPendingRequestAttachments();
   closeClientRequestDetail();
 }
 
@@ -431,6 +517,7 @@ function renderClientSummary(client) {
   text("cpRecurring", client.recurring ? "Recurring" : "One-Time");
   text("cpUpdatesRemaining", Number.isFinite(client.updatesRemaining) ? String(client.updatesRemaining) : "-");
   text("cpPaymentStatus", client.paid ? "Paid" : "Unpaid");
+  text("cpPhone", client.phone || "-");
   text("cpLastPaymentNote", client.lastPaymentNote || "-");
   text("cpBillingNotes", client.billingNotes || "-");
 
@@ -495,6 +582,7 @@ function openClientRequestDetail(requestId) {
   if (!req || !requestDetailOverlay || !requestDetailBody) return;
   activeRequestId = requestId;
   renderClientRequestDetail(req);
+  void ensureClientRequestAttachments(req);
   requestDetailOverlay.classList.add("open");
 }
 
@@ -564,6 +652,11 @@ function renderClientRequestDetail(req) {
     </div>
 
     <div class="client-detail-section">
+      <div class="client-detail-label">Attachments</div>
+      ${renderClientAttachmentSection(req)}
+    </div>
+
+    <div class="client-detail-section">
       <div class="timeline-toolbar">
         <div class="client-detail-label">Timeline & Team Updates</div>
         <div class="timeline-toolbar-right">
@@ -586,6 +679,241 @@ window.toggleClientTimeline = function () {
   const req = currentRequests.find((item) => item.id === activeRequestId);
   if (req) renderClientRequestDetail(req);
 };
+
+function requestAttachmentPrefix(clientId, requestId) {
+  return `client_request_uploads/${String(clientId || "").trim()}/${String(requestId || "").trim()}`;
+}
+
+function sanitizeAttachmentName(name) {
+  return String(name || "attachment")
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120) || "attachment";
+}
+
+function requestAttachmentFingerprint(file) {
+  return `${String(file?.name || "")}:${Number(file?.size || 0)}:${Number(file?.lastModified || 0)}`;
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function filesFromClipboardEvent(event) {
+  const seen = new Set();
+  const files = [];
+  const clipboardFiles = Array.from(event.clipboardData?.files || []);
+  clipboardFiles.forEach((file) => {
+    const key = requestAttachmentFingerprint(file);
+    if (!seen.has(key)) {
+      seen.add(key);
+      files.push(file);
+    }
+  });
+  const items = Array.from(event.clipboardData?.items || []);
+  items.forEach((item) => {
+    if (item.kind !== "file") return;
+    const file = item.getAsFile();
+    if (!file) return;
+    const key = requestAttachmentFingerprint(file);
+    if (!seen.has(key)) {
+      seen.add(key);
+      files.push(file);
+    }
+  });
+  return files;
+}
+
+function addPendingRequestAttachments(files, sourceLabel = "Added") {
+  const nextFiles = Array.isArray(files) ? files : [];
+  if (!nextFiles.length) return;
+  const existingKeys = new Set(pendingRequestAttachments.map((file) => requestAttachmentFingerprint(file)));
+  let added = 0;
+  let skipped = 0;
+
+  nextFiles.forEach((file) => {
+    if (!(file instanceof File)) {
+      skipped += 1;
+      return;
+    }
+    if (file.size > REQUEST_ATTACHMENT_MAX_BYTES) {
+      skipped += 1;
+      return;
+    }
+    if (pendingRequestAttachments.length >= REQUEST_ATTACHMENT_MAX_FILES) {
+      skipped += 1;
+      return;
+    }
+    const key = requestAttachmentFingerprint(file);
+    if (existingKeys.has(key)) {
+      skipped += 1;
+      return;
+    }
+    existingKeys.add(key);
+    pendingRequestAttachments.push(file);
+    added += 1;
+  });
+
+  renderPendingRequestAttachments();
+  if (added > 0) {
+    setRequestStatus(`${sourceLabel} ${added} attachment${added === 1 ? "" : "s"}.`, false);
+  } else if (skipped > 0) {
+    setRequestStatus(
+      `No new attachments added. Limit is ${REQUEST_ATTACHMENT_MAX_FILES} files, ${formatBytes(REQUEST_ATTACHMENT_MAX_BYTES)} each.`,
+      true
+    );
+  }
+}
+
+function clearPendingRequestAttachments() {
+  pendingRequestAttachments = [];
+  renderPendingRequestAttachments();
+}
+
+function renderPendingRequestAttachments() {
+  if (!requestAttachmentList) return;
+  if (!pendingRequestAttachments.length) {
+    requestAttachmentList.innerHTML = "";
+    return;
+  }
+  requestAttachmentList.innerHTML = pendingRequestAttachments
+    .map((file, index) => `
+      <div class="request-attachment-row">
+        <div class="request-attachment-main">
+          <div class="request-attachment-name">${escHtml(file.name || "Attachment")}</div>
+          <div class="request-attachment-meta">${escHtml(formatBytes(file.size))}</div>
+        </div>
+        <button class="request-attachment-remove" type="button" data-index="${index}" aria-label="Remove attachment">&times;</button>
+      </div>
+    `)
+    .join("");
+  requestAttachmentList.querySelectorAll(".request-attachment-remove").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const index = Number(btn.getAttribute("data-index"));
+      if (!Number.isFinite(index) || index < 0 || index >= pendingRequestAttachments.length) return;
+      pendingRequestAttachments.splice(index, 1);
+      renderPendingRequestAttachments();
+    });
+  });
+}
+
+async function uploadRequestAttachmentsForClient({ clientId, requestId, files }) {
+  const scopedFiles = Array.isArray(files) ? files.slice(0, REQUEST_ATTACHMENT_MAX_FILES) : [];
+  if (!scopedFiles.length) return { uploaded: 0, failed: 0 };
+  const prefix = requestAttachmentPrefix(clientId, requestId);
+  let uploaded = 0;
+  let failed = 0;
+
+  for (const file of scopedFiles) {
+    const safeName = sanitizeAttachmentName(file.name);
+    const randomId = (typeof window !== "undefined" && window.crypto && typeof window.crypto.randomUUID === "function")
+      ? window.crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+    const storagePath = `${prefix}/${Date.now()}_${randomId}_${safeName}`;
+    try {
+      await uploadBytes(storageRef(storage, storagePath), file, {
+        contentType: file.type || "application/octet-stream",
+        customMetadata: {
+          originalName: String(file.name || safeName).slice(0, 150),
+          requestId: String(requestId || ""),
+          clientId: String(clientId || ""),
+          uploadedBy: String(auth.currentUser?.uid || ""),
+        },
+      });
+      uploaded += 1;
+    } catch (err) {
+      console.error("uploadRequestAttachmentsForClient:", err);
+      failed += 1;
+    }
+  }
+
+  return { uploaded, failed };
+}
+
+function attachmentDisplayName(storageName, metadata) {
+  const fromMetadata = String(metadata?.customMetadata?.originalName || "").trim();
+  if (fromMetadata) return fromMetadata;
+  return String(storageName || "Attachment");
+}
+
+async function listRequestAttachments(clientId, requestId) {
+  if (!clientId || !requestId) return [];
+  const listing = await listAll(storageRef(storage, requestAttachmentPrefix(clientId, requestId)));
+  const attachments = await Promise.all(
+    listing.items.map(async (item) => {
+      let metadata = null;
+      try {
+        metadata = await getMetadata(item);
+      } catch (err) {
+        console.warn("attachment metadata fetch skipped:", err);
+      }
+      const url = await getDownloadURL(item);
+      return {
+        name: attachmentDisplayName(item.name, metadata),
+        size: Number(metadata?.size || 0),
+        contentType: String(metadata?.contentType || ""),
+        url,
+      };
+    })
+  );
+  attachments.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  return attachments;
+}
+
+async function ensureClientRequestAttachments(req) {
+  if (!req?.id || !req?.clientId) return;
+  const cached = requestAttachmentCache.get(req.id);
+  if (cached?.loaded || cached?.loading) return;
+  requestAttachmentCache.set(req.id, { loading: true, loaded: false, items: [], error: "" });
+  if (activeRequestId === req.id) renderClientRequestDetail(req);
+  try {
+    const items = await listRequestAttachments(req.clientId, req.id);
+    requestAttachmentCache.set(req.id, { loading: false, loaded: true, items, error: "" });
+  } catch (err) {
+    console.error("ensureClientRequestAttachments:", err);
+    requestAttachmentCache.set(req.id, {
+      loading: false,
+      loaded: true,
+      items: [],
+      error: "Could not load attachments right now.",
+    });
+  }
+  if (activeRequestId === req.id) {
+    const fresh = currentRequests.find((item) => item.id === req.id) || req;
+    renderClientRequestDetail(fresh);
+  }
+}
+
+function renderClientAttachmentSection(req) {
+  const state = requestAttachmentCache.get(req.id);
+  if (!state || state.loading) {
+    return `<div class="empty-state">Loading attachments...</div>`;
+  }
+  if (state.error) {
+    return `<div class="empty-state">${escHtml(state.error)}</div>`;
+  }
+  if (!state.items.length) {
+    return `<div class="empty-state">No attachments uploaded for this request.</div>`;
+  }
+  return `
+    <div class="client-attachments-list">
+      ${state.items.map((item) => `
+        <a class="client-attachment-link" href="${escHtmlAttr(item.url)}" target="_blank" rel="noopener" download="${escHtmlAttr(item.name)}">
+          <div>
+            <div>${escHtml(item.name)}</div>
+            <div class="client-attachment-meta">${escHtml(item.contentType || "File")} ${item.size ? `| ${escHtml(formatBytes(item.size))}` : ""}</div>
+          </div>
+          <span class="timeline-chip">Download</span>
+        </a>
+      `).join("")}
+    </div>
+  `;
+}
 
 function buildClientTimeline(req) {
   const timeline = [];
@@ -631,7 +959,21 @@ function buildClientTimeline(req) {
   }
 
   timeline.sort((a, b) => b.createdAtMs - a.createdAtMs);
-  return timeline;
+  const deduped = [];
+  const seen = new Set();
+  timeline.forEach((entry) => {
+    const minuteBucket = Math.floor(Number(entry.createdAtMs || 0) / 60000);
+    const signature = [
+      String(entry.kind || ""),
+      String(entry.status || ""),
+      String(entry.text || "").trim(),
+      String(minuteBucket),
+    ].join("|");
+    if (seen.has(signature)) return;
+    seen.add(signature);
+    deduped.push(entry);
+  });
+  return deduped;
 }
 
 function timelineEntryText(entry) {

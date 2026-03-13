@@ -1,0 +1,43 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDocPath() {
+      return /databases/(default)/documents/users/$(request.auth.uid);
+    }
+
+    function hasUserRecord() {
+      return isSignedIn() && firestore.exists(userDocPath());
+    }
+
+    function userRole() {
+      return hasUserRecord() ? firestore.get(userDocPath()).data.role : "";
+    }
+
+    function isAdmin() {
+      return hasUserRecord() && (userRole() == "admin" || userRole() == "super_admin");
+    }
+
+    function isClient() {
+      return hasUserRecord()
+        && userRole() == "client"
+        && firestore.get(userDocPath()).data.disabled != true;
+    }
+
+    function myClientId() {
+      return hasUserRecord() ? firestore.get(userDocPath()).data.clientId : "";
+    }
+
+    match /client_request_uploads/{clientId}/{requestId}/{fileName=**} {
+      allow read: if isAdmin() || (isClient() && myClientId() == clientId);
+      allow write: if isAdmin() || (isClient() && myClientId() == clientId);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
