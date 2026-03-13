@@ -3380,6 +3380,10 @@ window.openTaskDetail = function (id) {
           <option value="true"  ${task.done ? "selected" : ""}>Completed</option>
         </select>
       </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Task Details (Internal)</label>
+        <textarea class="form-input form-textarea" id="td_description" rows="4" placeholder="Optional private context, notes, links, or implementation details. This is not shown in the task list.">${escHtml(task.description || "")}</textarea>
+      </div>
       <div class="form-group">
         <label class="form-label">Date Added</label>
         <div class="detail-meta-value">${addedStr}</div>
@@ -3421,6 +3425,7 @@ window.saveTaskDetail = async function () {
       due:       document.getElementById("td_due").value || "",
       priority:  document.getElementById("td_priority").value,
       done:      document.getElementById("td_done").value === "true",
+      description: document.getElementById("td_description").value.trim(),
       updatedAt: serverTimestamp(),
     });
     closeTaskDetail();
@@ -6667,6 +6672,10 @@ function getModalForm(mode) {
           <option value="Low">Low</option>
         </select>
       </div>
+      <div class="form-group form-group-full">
+        <label class="form-label">Task Details (Internal)</label>
+        <textarea class="form-input form-textarea" id="f_taskDescription" rows="4" placeholder="Optional private context, notes, links, or implementation details. This is not shown in the task list."></textarea>
+      </div>
     `;
   }
 
@@ -6878,6 +6887,7 @@ window.saveModal = async function () {
         ownerType: owner.ownerType,
         due:       document.getElementById("f_due").value || "",
         priority:  document.getElementById("f_priority").value,
+        description: document.getElementById("f_taskDescription").value.trim(),
         done:      false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
