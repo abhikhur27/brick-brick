@@ -2871,6 +2871,11 @@ function renderPipeline(cards) {
       const ownerChip = (card.ownerUid || card.ownerName)
         ? `<div class="pipeline-owner">${assigneeChipHtml(card.ownerUid, card.ownerName)}</div>`
         : "";
+      const rawTitle = String(card.title || "").trim();
+      const rawCompany = String(card.company || "").trim();
+      const displayTitle = rawTitle || rawCompany || "Untitled lead";
+      const showCompanySubtitle = Boolean(rawCompany)
+        && normalizeLeadEntityKey(rawCompany) !== normalizeLeadEntityKey(displayTitle);
 
       const moveButtons = COLS
         .filter((c) => c.key !== key)
@@ -2902,8 +2907,8 @@ function renderPipeline(cards) {
         openLeadDetail(card.id);
       });
       cardEl.innerHTML = `
-        <div class="card-title">${escHtml(card.title)}</div>
-        ${card.company ? `<div class="card-company">${escHtml(card.company)}</div>` : ""}
+        <div class="card-title">${escHtml(displayTitle)}</div>
+        ${showCompanySubtitle ? `<div class="card-company">${escHtml(rawCompany)}</div>` : ""}
         <div class="card-meta">${escHtml(card.note || "")}</div>
         <span class="card-tag ${tagClass}">${escHtml(card.service || "")}</span>
         ${outcomeBadge}
