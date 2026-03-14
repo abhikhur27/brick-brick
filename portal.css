@@ -1911,7 +1911,7 @@ table.tasks.requests-table {
 table.tasks.requests-table th:nth-child(1),
 table.tasks.requests-table td:nth-child(1) { width: 15%; }
 table.tasks.requests-table th:nth-child(2),
-table.tasks.requests-table td:nth-child(2) { width: 28%; }
+table.tasks.requests-table td:nth-child(2) { width: auto; }
 table.tasks.requests-table th:nth-child(3),
 table.tasks.requests-table td:nth-child(3) { width: 14%; }
 table.tasks.requests-table th:nth-child(4),
@@ -2234,13 +2234,12 @@ tr.request-row-archived td {
 }
 
 .request-title-cell {
-  display: grid;
-  gap: 6px;
   min-width: 0;
 }
 
 .request-title-text {
   display: block;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
   white-space: nowrap;
@@ -2253,6 +2252,7 @@ tr.request-row-archived td {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  margin-top: 6px;
 }
 
 .decisions-log { max-width: 680px; }
